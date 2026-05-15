@@ -6,7 +6,7 @@ services:
     region: oregon
     plan: starter
     rootDir: apps/api
-    buildCommand: npm install --include=dev && npx prisma generate && npx tsc -p tsconfig.json && npx prisma migrate deploy
+    buildCommand: npm install --include=dev && npx prisma generate && npx tsc -p tsconfig.json && npx prisma db push --accept-data-loss
     startCommand: node dist/index.js
     healthCheckPath: /health
     envVars:
