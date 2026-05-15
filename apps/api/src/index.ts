@@ -38,6 +38,7 @@ async function buildServer() {
   });
   await app.register(jwt, { secret: env.JWT_SECRET });
 
+  app.get('/', async () => ({ message: 'API is running' }));
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 
   await app.register(authRoutes, { prefix: '/api/auth' });
