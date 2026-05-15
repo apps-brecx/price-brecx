@@ -1,0 +1,27 @@
+{
+  "name": "priceobo",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm --workspace=apps/api run dev",
+    "dev:web": "npm --workspace=apps/web run dev",
+    "build": "npm --workspace=apps/api run build && npm --workspace=apps/web run build",
+    "build:api": "npm --workspace=apps/api run build",
+    "build:web": "npm --workspace=apps/web run build",
+    "start:api": "npm --workspace=apps/api run start",
+    "db:migrate": "npm --workspace=apps/api run db:migrate",
+    "db:deploy": "npm --workspace=apps/api run db:deploy",
+    "db:seed": "npm --workspace=apps/api run db:seed",
+    "db:generate": "npm --workspace=apps/api run db:generate"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

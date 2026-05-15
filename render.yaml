@@ -1,0 +1,40 @@
+services:
+  # ============ API (Fastify + Prisma) ============
+  - type: web
+    name: priceobo-api
+    runtime: node
+    region: oregon
+    plan: starter
+    rootDir: apps/api
+    buildCommand: npm install --include=dev && npx prisma generate && npx tsc -p tsconfig.json && npx prisma migrate deploy
+    startCommand: node dist/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      # Set DATABASE_URL to your Neon Postgres connection string (use the pooled URL with sslmode=require).
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      # Comma-separated list of allowed web origins. Update once the static site URL is known.
+      - key: CORS_ORIGIN
+        sync: false
+
+  # ============ Web (Vite + React, static) ============
+  - type: web
+    name: priceobo-web
+    runtime: static
+    rootDir: apps/web
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      # Set this to the API URL after `priceobo-api` is created (e.g. https://priceobo-api.onrender.com).
+      - key: VITE_API_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

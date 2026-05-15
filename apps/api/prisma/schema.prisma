@@ -1,0 +1,492 @@
+// Priceobo Prisma schema
+// Generated for the production app; see PRICEOBO_APP_PLAN.md section 6.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ Auth & workspaces ============
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  name         String?
+  avatarUrl    String?
+  timezone     String       @default("America/New_York")
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  memberships  Membership[]
+  activities   Activity[]
+}
+
+model Workspace {
+  id          String @id @default(cuid())
+  slug        String @unique
+  name        String
+  ownerId     String
+  plan        Plan   @default(FREE)
+  createdAt   DateTime @default(now())
+
+  memberships         Membership[]
+  marketplaces        MarketplaceConnection[]
+  products            Product[]
+  skus                SKU[]
+  schedules           PriceSchedule[]
+  automations         AutomationRule[]
+  alerts              Alert[]
+  tags                Tag[]
+  apiKeys             ApiKey[]
+  webhooks            Webhook[]
+  notificationRules   NotificationRule[]
+  activities          Activity[]
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+model Membership {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        Role     @default(VIEWER)
+  permissions String[] @default([])
+  invitedBy   String?
+  joinedAt    DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  USER
+  VIEWER
+}
+
+// ============ Marketplaces ============
+
+model MarketplaceConnection {
+  id             String           @id @default(cuid())
+  workspaceId    String
+  marketplace    Marketplace
+  status         ConnectionStatus @default(PENDING)
+  displayName    String?
+  region         String?
+  sellerId       String?
+  accessToken    String?
+  refreshToken   String?
+  tokenExpiresAt DateTime?
+  metadata       Json?
+  lastSyncAt     DateTime?
+  createdAt      DateTime         @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  listings  Listing[]
+
+  @@unique([workspaceId, marketplace, region])
+}
+
+enum Marketplace {
+  AMAZON
+  WALMART
+  SHOPIFY
+  TIKTOK
+  EBAY
+  ETSY
+  FAIRE
+}
+
+enum ConnectionStatus {
+  PENDING
+  CONNECTED
+  ERROR
+  DISCONNECTED
+}
+
+// ============ Products & SKUs ============
+
+model Product {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  basePrice   Decimal  @db.Decimal(10, 2)
+  imageUrl    String?
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  skus      SKU[]
+  inventory Inventory[]
+}
+
+model SKU {
+  id          String    @id @default(cuid())
+  workspaceId String
+  productId   String
+  sku         String
+  asin        String?
+  upc         String?
+  status      SKUStatus @default(ACTIVE)
+  favorite    Boolean   @default(false)
+  fbaPrice    Decimal?  @db.Decimal(10, 2)
+  fbmPrice    Decimal?  @db.Decimal(10, 2)
+  shelves     Int       @default(0)
+  fbmCount    Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  listings  Listing[]
+  schedules PriceSchedule[]
+  tags      TagSKU[]
+
+  @@unique([workspaceId, sku])
+  @@index([workspaceId, status])
+}
+
+enum SKUStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+model Listing {
+  id             String   @id @default(cuid())
+  skuId          String
+  connectionId   String
+  marketplaceSku String
+  currentPrice   Decimal  @db.Decimal(10, 2)
+  buyboxOwner    String?
+  buyboxPrice    Decimal? @db.Decimal(10, 2)
+  stockAvailable Int      @default(0)
+  fulfillment    String?
+  url            String?
+  autoReprice    Boolean  @default(false)
+  lastUpdated    DateTime @updatedAt
+
+  sku          SKU                   @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  connection   MarketplaceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  priceHistory PriceHistory[]
+
+  @@unique([skuId, connectionId])
+}
+
+model PriceHistory {
+  id           String        @id @default(cuid())
+  listingId    String
+  oldPrice     Decimal       @db.Decimal(10, 2)
+  newPrice     Decimal       @db.Decimal(10, 2)
+  trigger      ChangeTrigger
+  triggeredBy  String?
+  scheduleId   String?
+  automationId String?
+  status       ChangeStatus  @default(SUCCESS)
+  errorMessage String?
+  changedAt    DateTime      @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, changedAt])
+}
+
+enum ChangeTrigger {
+  MANUAL
+  SCHEDULED
+  AUTOMATION
+  BUYBOX
+  ALERT_RESPONSE
+}
+
+enum ChangeStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+// ============ Inventory ============
+
+model Inventory {
+  id            String   @id @default(cuid())
+  productId     String
+  warehouseId   String
+  warehouseName String
+  onHand        Int      @default(0)
+  reserved      Int      @default(0)
+  incoming      Int      @default(0)
+  lastSyncAt    DateTime @default(now())
+
+  product   Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  shipments Shipment[]
+}
+
+model Shipment {
+  id               String         @id @default(cuid())
+  inventoryId      String
+  shipmentNumber   String
+  origin           String
+  destination      String
+  carrier          String
+  quantity         Int
+  status           ShipmentStatus
+  placedAt         DateTime
+  estimatedArrival DateTime?
+  actualArrival    DateTime?
+
+  inventory Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+}
+
+enum ShipmentStatus {
+  PLACED
+  IN_TRANSIT
+  AT_CUSTOMS
+  DELIVERED
+  CANCELLED
+}
+
+// ============ Schedules ============
+
+model PriceSchedule {
+  id          String         @id @default(cuid())
+  workspaceId String
+  skuId       String
+  type        ScheduleType
+  status      ScheduleStatus @default(UPCOMING)
+  basePrice   Decimal?       @db.Decimal(10, 2)
+  newPrice    Decimal        @db.Decimal(10, 2)
+  revertPrice Decimal?       @db.Decimal(10, 2)
+  timezone    String         @default("America/New_York")
+  startAt     DateTime
+  endAt       DateTime?
+  weekdays    String[]       @default([])
+  monthDay    Int?
+  recurrence  String?
+  notes       String?
+  createdBy   String
+  createdAt   DateTime       @default(now())
+  executedAt  DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sku       SKU       @relation(fields: [skuId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, startAt])
+}
+
+enum ScheduleType {
+  SINGLE
+  WEEKLY
+  WEEKLY_REVERT
+  MONTHLY
+  SALE
+}
+
+enum ScheduleStatus {
+  UPCOMING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// ============ Automation ============
+
+model AutomationRule {
+  id           String           @id @default(cuid())
+  workspaceId  String
+  name         String
+  type         AutomationType
+  status       AutomationStatus @default(ACTIVE)
+  matchMode    MatchMode        @default(ALL)
+  conditions   Json
+  adjustment   Json
+  schedule     Json?
+  affectedSkus String[]
+  createdBy    String
+  createdAt    DateTime         @default(now())
+  lastRunAt    DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+enum AutomationType {
+  COMPETITOR_BASED
+  STOCK_BASED
+  TIME_BASED
+  BUYBOX
+  CUSTOM
+}
+
+enum AutomationStatus {
+  ACTIVE
+  PAUSED
+  DRAFT
+}
+
+enum MatchMode {
+  ALL
+  ANY
+}
+
+// ============ Alerts ============
+
+model Alert {
+  id           String      @id @default(cuid())
+  workspaceId  String
+  type         AlertType
+  severity     Severity
+  title        String
+  description  String
+  metadata     Json?
+  status       AlertStatus @default(OPEN)
+  triggeredAt  DateTime    @default(now())
+  resolvedAt   DateTime?
+  snoozedUntil DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status, triggeredAt])
+}
+
+enum AlertType {
+  PRICE_DRIFT
+  PRICE_STOCK_OUT_SPIKE
+  BUYBOX_LOST
+  COMPETITOR_UNDERCUT
+  SALES_DROP
+  CONVERSION_DROP
+  REVENUE_DROP
+  SALES_RECOVERY
+  SALES_SPIKE
+  INVENTORY_LOW
+  SCHEDULE_FAILED
+}
+
+enum Severity {
+  CRITICAL
+  WARNING
+  INFO
+  RESOLVED
+}
+
+enum AlertStatus {
+  OPEN
+  SNOOZED
+  RESOLVED
+  DISMISSED
+}
+
+// ============ Notification rules ============
+
+model NotificationRule {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  name            String
+  category        NotifCategory
+  active          Boolean       @default(true)
+  scheduleEnabled Boolean       @default(true)
+  timezone        String        @default("America/New_York")
+  time            String        @default("09:00")
+  cadence         String?
+  weekdays        String[]      @default([])
+  matchMode       MatchMode     @default(ALL)
+  tags            String[]      @default([])
+  warehouseRules  Json?
+  emails          String[]      @default([])
+  channels        Json
+  createdAt       DateTime      @default(now())
+  lastSentAt      DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+enum NotifCategory {
+  STOCK_ALERT
+  BACK_IN_STOCK
+  WALMART_STOCK
+  PRICE_ALERT
+  SALES_ALERT
+}
+
+// ============ Tags ============
+
+model Tag {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  color       String   @default("blue")
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  skus      TagSKU[]
+
+  @@unique([workspaceId, name])
+}
+
+model TagSKU {
+  tagId String
+  skuId String
+  tag   Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  sku   SKU @relation(fields: [skuId], references: [id], onDelete: Cascade)
+
+  @@id([tagId, skuId])
+}
+
+// ============ Activity log ============
+
+model Activity {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String?
+  type        String
+  description String
+  metadata    Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+// ============ API keys & webhooks ============
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  keyHash     String    @unique
+  prefix      String
+  permissions String[]
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model Webhook {
+  id          String   @id @default(cuid())
+  workspaceId String
+  url         String
+  events      String[]
+  secret      String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
