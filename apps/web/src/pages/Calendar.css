@@ -1,0 +1,100 @@
+.cal-month-label {
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 140px;
+  text-align: center;
+}
+.cal-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+}
+@media (max-width: 1000px) {
+  .cal-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.cal-card {
+  padding: 12px;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.cal-weekday {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 6px 4px;
+  text-align: center;
+}
+.cal-cell {
+  min-height: 96px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--bg-1);
+}
+.cal-cell-empty {
+  background: transparent;
+  border-color: transparent;
+}
+.cal-daynum {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+.cal-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cal-chip {
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: var(--accent-soft, #eef2ff);
+  color: var(--accent-fg, #4338ca);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-side .card-body {
+  max-height: 640px;
+  overflow-y: auto;
+}
+.cal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cal-list-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.cal-list-item:last-child {
+  border-bottom: none;
+}
+.cal-list-title {
+  font-size: 13px;
+  font-weight: 550;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-list-sku {
+  font-size: 12px;
+  margin-top: 2px;
+}
+.cal-list-date {
+  font-size: 12px;
+  margin-top: 2px;
+}

@@ -1,50 +1,40 @@
-import type { FastifyPluginAsync } from 'fastify';
-import { prisma } from '../lib/prisma';
-import { requireWorkspace } from '../lib/auth';
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import { sql } from "../db.js";
 
-export const activityRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook('preHandler', requireWorkspace);
+const query = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(50),
+  action: z.string().optional(),
+  search: z.string().optional(),
+});
 
-  app.get('/', async (req) => {
-    const q = req.query as Record<string, string>;
-    const where: any = { workspaceId: req.workspaceId! };
-    if (q.type) where.type = q.type;
-    if (q.from || q.to) {
-      where.createdAt = {};
-      if (q.from) where.createdAt.gte = new Date(q.from);
-      if (q.to) where.createdAt.lte = new Date(q.to);
-    }
-    const take = Math.min(Number(q.pageSize ?? 50), 200);
-    const skip = (Math.max(Number(q.page ?? 1), 1) - 1) * take;
-    const [total, items] = await Promise.all([
-      prisma.activity.count({ where }),
-      prisma.activity.findMany({
-        where,
-        include: { user: { select: { name: true, email: true } } },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take,
-      }),
-    ]);
-    return { total, items };
+const cols = sql`
+  id, actor, action, entity_type as "entityType", entity_id as "entityId",
+  summary, meta, created_at as "createdAt"
+`;
+
+export default async function activityRoutes(app: FastifyInstance) {
+  app.addHook("preHandler", app.requireAuth);
+
+  app.get("/activity", async (req) => {
+    const q = query.parse(req.query);
+    const wsId = req.user!.workspaceId;
+    const offset = (q.page - 1) * q.pageSize;
+    const search = q.search ? `%${q.search}%` : null;
+    const where = sql`
+      where workspace_id = ${wsId}
+      ${q.action ? sql`and action = ${q.action}` : sql``}
+      ${search ? sql`and summary ilike ${search}` : sql``}
+    `;
+    const [{ count }] = await sql<{ count: number }[]>`
+      select count(*)::int as count from activity_log ${where}
+    `;
+    const items = await sql`
+      select ${cols} from activity_log ${where}
+      order by created_at desc
+      limit ${q.pageSize} offset ${offset}
+    `;
+    return { items, total: count, page: q.page, pageSize: q.pageSize };
   });
-
-  app.get('/export', async (req, reply) => {
-    const rows = await prisma.activity.findMany({
-      where: { workspaceId: req.workspaceId! },
-      include: { user: { select: { email: true, name: true } } },
-      orderBy: { createdAt: 'desc' },
-      take: 10000,
-    });
-    const csv = [
-      'timestamp,user,type,description',
-      ...rows.map(
-        (r) =>
-          `${r.createdAt.toISOString()},${r.user?.email ?? ''},${r.type},"${(r.description ?? '').replace(/"/g, '""')}"`,
-      ),
-    ].join('\n');
-    reply.header('content-type', 'text/csv');
-    reply.header('content-disposition', 'attachment; filename="activity.csv"');
-    return csv;
-  });
-};
+}

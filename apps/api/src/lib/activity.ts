@@ -1,21 +1,26 @@
-import { prisma } from './prisma';
+import { sql, jsonb } from "../db.js";
+import type { ActivityAction } from "@fbm/shared";
 
-export async function logActivity(opts: {
+export async function recordActivity(input: {
   workspaceId: string;
-  userId?: string;
-  type: string;
-  description: string;
-  metadata?: unknown;
-  ipAddress?: string;
-}) {
-  await prisma.activity.create({
-    data: {
-      workspaceId: opts.workspaceId,
-      userId: opts.userId,
-      type: opts.type,
-      description: opts.description,
-      metadata: opts.metadata as any,
-      ipAddress: opts.ipAddress,
-    },
-  });
+  actor: string;
+  action: ActivityAction;
+  entityType: string;
+  entityId?: string | null;
+  summary: string;
+  meta?: Record<string, unknown>;
+}): Promise<void> {
+  await sql`
+    insert into activity_log
+      (workspace_id, actor, action, entity_type, entity_id, summary, meta)
+    values (
+      ${input.workspaceId},
+      ${input.actor},
+      ${input.action},
+      ${input.entityType},
+      ${input.entityId ?? null},
+      ${input.summary},
+      ${jsonb(input.meta ?? {})}
+    )
+  `;
 }

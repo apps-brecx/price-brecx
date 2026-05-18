@@ -1,109 +1,51 @@
-import type { FastifyPluginAsync } from 'fastify';
-import { z } from 'zod';
-import { prisma } from '../lib/prisma';
-import { requireWorkspace } from '../lib/auth';
-import { logActivity } from '../lib/activity';
+import type { FastifyInstance } from "fastify";
+import { marketplaceCredentialUpsertSchema } from "@fbm/shared";
+import { sql } from "../db.js";
+import { getAmazonProvider } from "../amazon/index.js";
 
-const marketplaceEnum = z.enum(['AMAZON', 'WALMART', 'SHOPIFY', 'TIKTOK', 'EBAY', 'ETSY', 'FAIRE']);
+const cols = sql`
+  id, channel, label, seller_id as "sellerId",
+  marketplace_id as "marketplaceId", connected,
+  created_at as "createdAt"
+`;
 
-const createSchema = z.object({
-  marketplace: marketplaceEnum,
-  displayName: z.string().optional(),
-  region: z.string().optional(),
-  sellerId: z.string().optional(),
-  accessToken: z.string().optional(),
-  refreshToken: z.string().optional(),
-  metadata: z.any().optional(),
-});
+export default async function marketplaceRoutes(app: FastifyInstance) {
+  app.addHook("preHandler", app.requireAuth);
 
-export const marketplaceRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook('preHandler', requireWorkspace);
-
-  app.get('/', async (req) => {
-    const list = await prisma.marketplaceConnection.findMany({
-      where: { workspaceId: req.workspaceId! },
-      include: { _count: { select: { listings: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
-    return list.map((m) => ({
-      id: m.id,
-      marketplace: m.marketplace,
-      displayName: m.displayName,
-      region: m.region,
-      status: m.status,
-      sellerId: m.sellerId,
-      lastSyncAt: m.lastSyncAt,
-      listingCount: m._count.listings,
-      createdAt: m.createdAt,
-    }));
+  app.get("/marketplaces", async (req) => {
+    const items = await sql`
+      select ${cols} from marketplace_credentials
+      where workspace_id = ${req.user!.workspaceId}
+      order by created_at desc
+    `;
+    return { items, amazonMode: getAmazonProvider().mode };
   });
 
-  app.post('/', async (req, reply) => {
-    const body = createSchema.parse(req.body);
-    try {
-      const conn = await prisma.marketplaceConnection.create({
-        data: {
-          workspaceId: req.workspaceId!,
-          marketplace: body.marketplace,
-          displayName: body.displayName,
-          region: body.region,
-          sellerId: body.sellerId,
-          accessToken: body.accessToken,
-          refreshToken: body.refreshToken,
-          metadata: body.metadata,
-          status: body.accessToken ? 'CONNECTED' : 'PENDING',
-        },
-      });
-      await logActivity({
-        workspaceId: req.workspaceId!,
-        userId: req.userId,
-        type: 'marketplace.connected',
-        description: `Connected ${body.marketplace}${body.region ? ' (' + body.region + ')' : ''}`,
-      });
-      return conn;
-    } catch (e: any) {
-      if (e.code === 'P2002') return reply.code(409).send({ error: 'Already connected' });
-      throw e;
-    }
+  app.put("/marketplaces", async (req, reply) => {
+    const body = marketplaceCredentialUpsertSchema.parse(req.body);
+    const connected = Boolean(
+      body.refreshToken && body.lwaAppId && body.lwaClientSecret,
+    );
+    const [row] = await sql`
+      insert into marketplace_credentials
+        (workspace_id, channel, label, seller_id, marketplace_id,
+         refresh_token, lwa_app_id, lwa_client_secret, connected)
+      values (
+        ${req.user!.workspaceId}, ${body.channel}, ${body.label},
+        ${body.sellerId ?? null}, ${body.marketplaceId ?? null},
+        ${body.refreshToken ?? null}, ${body.lwaAppId ?? null},
+        ${body.lwaClientSecret ?? null}, ${connected}
+      )
+      on conflict (workspace_id, channel) do update set
+        label = excluded.label,
+        seller_id = coalesce(excluded.seller_id, marketplace_credentials.seller_id),
+        marketplace_id = coalesce(excluded.marketplace_id, marketplace_credentials.marketplace_id),
+        refresh_token = coalesce(excluded.refresh_token, marketplace_credentials.refresh_token),
+        lwa_app_id = coalesce(excluded.lwa_app_id, marketplace_credentials.lwa_app_id),
+        lwa_client_secret = coalesce(excluded.lwa_client_secret, marketplace_credentials.lwa_client_secret),
+        connected = excluded.connected
+      returning ${cols}
+    `;
+    return reply.code(200).send(row);
   });
-
-  app.patch('/:id', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const existing = await prisma.marketplaceConnection.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!existing) return reply.code(404).send({ error: 'Not found' });
-    const body = createSchema.partial().parse(req.body);
-    const conn = await prisma.marketplaceConnection.update({ where: { id }, data: body });
-    return conn;
-  });
-
-  app.delete('/:id', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const existing = await prisma.marketplaceConnection.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!existing) return reply.code(404).send({ error: 'Not found' });
-    await prisma.marketplaceConnection.delete({ where: { id } });
-    await logActivity({
-      workspaceId: req.workspaceId!,
-      userId: req.userId,
-      type: 'marketplace.disconnected',
-      description: `Disconnected ${existing.marketplace}`,
-    });
-    return { ok: true };
-  });
-
-  app.post('/:id/sync', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const existing = await prisma.marketplaceConnection.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!existing) return reply.code(404).send({ error: 'Not found' });
-    const updated = await prisma.marketplaceConnection.update({
-      where: { id },
-      data: { lastSyncAt: new Date(), status: 'CONNECTED' },
-    });
-    await logActivity({
-      workspaceId: req.workspaceId!,
-      userId: req.userId,
-      type: 'marketplace.sync',
-      description: `Sync triggered for ${existing.marketplace}`,
-    });
-    return updated;
-  });
-};
+}

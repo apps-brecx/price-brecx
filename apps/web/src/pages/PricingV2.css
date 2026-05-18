@@ -1,0 +1,15 @@
+.pv2-title {
+  font-weight: 550;
+  font-size: 13px;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv2-sku {
+  color: var(--text-3);
+  margin-top: 3px;
+}
+.strong {
+  font-weight: 600;
+}

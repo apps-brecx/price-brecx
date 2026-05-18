@@ -1,170 +1,206 @@
-import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
-import { Activity, AlertTriangle, Clock, Plug } from 'lucide-react';
-import { api } from '@/lib/api';
-import { KpiCard } from '@/components/ui/KpiCard';
-import { MarketplaceLogo } from '@/components/ui/MarketplacePill';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { formatNumber, formatMoney, relativeTime } from '@/lib/utils';
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../lib/api";
+import { money, num, relativeTime } from "../lib/format";
+import { PageHeader } from "../components/PageHeader";
+import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
+import { StatusBadge } from "../components/Badges";
+import "./Dashboard.css";
 
-type DashboardData = {
-  kpis: { skuCount: number; listingCount: number; priceChanges30d: number; activeSchedules: number; openAlerts: number };
-  marketplaces: { id: string; marketplace: string; status: string; displayName: string | null; skuCount: number; lastSyncAt: string | null }[];
-  upcomingSchedules: { id: string; startAt: string; type: string; newPrice: string; skuCode: string; productName: string }[];
-  recentAlerts: { id: string; title: string; description: string; severity: string; triggeredAt: string }[];
-  recentActivity: { id: string; type: string; description: string; createdAt: string; userName: string | null }[];
-};
+interface DashboardData {
+  stats: {
+    skuCount: number;
+    activeSchedules: number;
+    openAlerts: number;
+    revenue30d: number;
+  };
+  recentSchedules: {
+    id: string;
+    sku: string;
+    title: string;
+    price: number;
+    status: string;
+    createdAt: string;
+  }[];
+  recentActivity: {
+    id: string;
+    actor: string;
+    action: string;
+    summary: string;
+    createdAt: string;
+  }[];
+  topSkus: {
+    id: string;
+    sku: string;
+    title: string;
+    sales30d: number;
+    price: number;
+  }[];
+}
 
-export default function Dashboard() {
-  const { data, isLoading } = useQuery<DashboardData>({
-    queryKey: ['dashboard'],
-    queryFn: () => api('/api/dashboard'),
+export function Dashboard() {
+  const query = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: () => api.get<DashboardData>("/dashboard"),
   });
 
-  if (isLoading || !data) {
-    return <div className="text-ink-3 text-sm">Loading…</div>;
+  if (query.isLoading) {
+    return (
+      <div>
+        <PageHeader
+          title="Dashboard"
+          subtitle="Your pricing operation at a glance"
+        />
+        <Loading />
+      </div>
+    );
   }
 
-  const { kpis, marketplaces, upcomingSchedules, recentAlerts, recentActivity } = data;
+  if (query.isError || !query.data) {
+    return (
+      <div>
+        <PageHeader
+          title="Dashboard"
+          subtitle="Your pricing operation at a glance"
+        />
+        <ErrorState />
+      </div>
+    );
+  }
+
+  const { stats, recentSchedules, recentActivity, topSkus } = query.data;
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <KpiCard label="SKUs" value={formatNumber(kpis.skuCount)} hint="across all marketplaces" />
-        <KpiCard label="Listings" value={formatNumber(kpis.listingCount)} hint="connected channels" />
-        <KpiCard label="Price changes · 30d" value={formatNumber(kpis.priceChanges30d)} hint="manual + automation" />
-        <KpiCard label="Active schedules" value={formatNumber(kpis.activeSchedules)} hint={`${kpis.openAlerts} open alerts`} />
+    <div>
+      <PageHeader
+        title="Dashboard"
+        subtitle="Your pricing operation at a glance"
+      />
+
+      <div className="kpi-grid">
+        <div className="stat-card">
+          <div className="stat-label">SKUs</div>
+          <div className="stat-value">{num(stats.skuCount)}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Active Schedules</div>
+          <div className="stat-value">{num(stats.activeSchedules)}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Open Alerts</div>
+          <div className="stat-value">{num(stats.openAlerts)}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">30d Revenue</div>
+          <div className="stat-value">{money(stats.revenue30d)}</div>
+        </div>
       </div>
 
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-[15px] font-semibold">Connected marketplaces</h2>
-          <Link to="/settings/marketplaces" className="text-[12.5px] font-medium text-brand-700">
-            Manage →
-          </Link>
-        </div>
-        {marketplaces.length === 0 ? (
-          <div className="card">
-            <EmptyState
-              icon={Plug}
-              title="No marketplaces connected"
-              description="Connect Amazon, Walmart, Shopify, TikTok, eBay, Etsy or Faire to start syncing listings."
-              action={
-                <Link to="/settings/marketplaces" className="btn btn-primary btn-sm">
-                  Connect a marketplace
-                </Link>
-              }
-            />
+      <div className="dash-cols">
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Recent schedules</span>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {marketplaces.map((m) => (
-              <div key={m.id} className="card card-pad">
-                <div className="mb-2 flex items-center justify-between">
-                  <MarketplaceLogo id={m.marketplace} />
-                  <span
-                    className={`chip ${m.status === 'CONNECTED' ? 'chip-success' : m.status === 'ERROR' ? 'chip-danger' : ''}`}
-                  >
-                    {m.status.toLowerCase()}
-                  </span>
-                </div>
-                <div className="text-[14px] font-semibold">{m.displayName || m.marketplace}</div>
-                <div className="text-[12.5px] text-ink-3">{formatNumber(m.skuCount)} listings</div>
-                <div className="mt-2 text-[11.5px] text-ink-4">
-                  {m.lastSyncAt ? `Synced ${relativeTime(m.lastSyncAt)}` : 'Never synced'}
-                </div>
+          <div className="card-body">
+            {recentSchedules.length === 0 ? (
+              <EmptyState
+                title="No recent schedules"
+                message="Scheduled price changes will appear here."
+              />
+            ) : (
+              <div className="tbl-wrap">
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>SKU</th>
+                      <th>Title</th>
+                      <th className="right">Price</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentSchedules.map((s) => (
+                      <tr key={s.id}>
+                        <td className="mono">{s.sku}</td>
+                        <td className="dash-title">{s.title}</td>
+                        <td className="right strong">{money(s.price)}</td>
+                        <td>
+                          <StatusBadge status={s.status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </section>
+        </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <section className="card">
-          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--border)' }}>
-            <div className="flex items-center gap-2">
-              <Clock size={15} className="text-ink-3" />
-              <h3 className="text-[14px] font-semibold">Upcoming schedules</h3>
-            </div>
-            <Link to="/calendar" className="text-[12px] font-medium text-brand-700">
-              View calendar →
-            </Link>
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Recent activity</span>
           </div>
-          {upcomingSchedules.length === 0 ? (
-            <EmptyState icon={Clock} title="No upcoming changes" description="Create a schedule from the Calendar or SKUs page." />
-          ) : (
-            <ul className="divide-y" style={{ borderColor: 'var(--border)' }}>
-              {upcomingSchedules.map((s) => (
-                <li key={s.id} className="flex items-center justify-between px-4 py-3 text-[13px]">
-                  <div className="min-w-0">
-                    <div className="truncate font-medium">{s.productName}</div>
-                    <div className="mono text-ink-3">{s.skuCode}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-semibold">{formatMoney(s.newPrice)}</div>
-                    <div className="text-[11.5px] text-ink-3">{new Date(s.startAt).toLocaleString()}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="card">
-          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--border)' }}>
-            <div className="flex items-center gap-2">
-              <AlertTriangle size={15} className="text-ink-3" />
-              <h3 className="text-[14px] font-semibold">Open alerts</h3>
-            </div>
-            <Link to="/price-alert" className="text-[12px] font-medium text-brand-700">
-              View all →
-            </Link>
+          <div className="card-body">
+            {recentActivity.length === 0 ? (
+              <EmptyState
+                title="No recent activity"
+                message="Workspace activity will appear here."
+              />
+            ) : (
+              <ul className="activity-list">
+                {recentActivity.map((a) => (
+                  <li key={a.id} className="activity-item">
+                    <div className="activity-main">
+                      <span className="activity-actor">{a.actor}</span>{" "}
+                      <span className="muted">{a.action}</span>
+                      <div className="activity-summary">{a.summary}</div>
+                    </div>
+                    <span className="muted activity-time">
+                      {relativeTime(a.createdAt)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          {recentAlerts.length === 0 ? (
-            <EmptyState icon={AlertTriangle} title="No open alerts" description="You'll see price drifts, Buy Box losses, and stock issues here." />
-          ) : (
-            <ul className="divide-y" style={{ borderColor: 'var(--border)' }}>
-              {recentAlerts.map((a) => (
-                <li key={a.id} className="flex items-start gap-3 px-4 py-3 text-[13px]">
-                  <span className={`severity-dot ${a.severity.toLowerCase()}`} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">{a.title}</div>
-                    <div className="truncate text-[12px] text-ink-3">{a.description}</div>
-                  </div>
-                  <div className="text-[11.5px] text-ink-3">{relativeTime(a.triggeredAt)}</div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        </div>
       </div>
 
-      <section className="card">
-        <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex items-center gap-2">
-            <Activity size={15} className="text-ink-3" />
-            <h3 className="text-[14px] font-semibold">Recent activity</h3>
-          </div>
-          <Link to="/activity-log" className="text-[12px] font-medium text-brand-700">
-            View log →
-          </Link>
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">Top SKUs by 30d sales</span>
         </div>
-        {recentActivity.length === 0 ? (
-          <EmptyState icon={Activity} title="No activity yet" description="Sign-ins, price changes, and rule edits will appear here." />
-        ) : (
-          <ul className="divide-y" style={{ borderColor: 'var(--border)' }}>
-            {recentActivity.map((a) => (
-              <li key={a.id} className="flex items-center justify-between px-4 py-2.5 text-[13px]">
-                <div className="min-w-0">
-                  <span className="font-medium">{a.userName ?? 'System'}</span>
-                  <span className="ml-2 text-ink-3">{a.description}</span>
-                </div>
-                <div className="text-[11.5px] text-ink-3">{relativeTime(a.createdAt)}</div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+        <div className="card-body">
+          {topSkus.length === 0 ? (
+            <EmptyState
+              title="No sales data"
+              message="Top performing SKUs will appear here."
+            />
+          ) : (
+            <div className="tbl-wrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Title</th>
+                    <th className="right">30d Sales</th>
+                    <th className="right">Price</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topSkus.map((s) => (
+                    <tr key={s.id}>
+                      <td className="mono">{s.sku}</td>
+                      <td className="dash-title">{s.title}</td>
+                      <td className="right">{num(s.sales30d)}</td>
+                      <td className="right strong">{money(s.price)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

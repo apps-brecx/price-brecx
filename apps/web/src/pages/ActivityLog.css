@@ -1,0 +1,11 @@
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  font-size: 12.5px;
+}
+.pager-btns {
+  display: flex;
+  gap: 8px;
+}

@@ -1,65 +1,47 @@
-const TOKEN_KEY = 'priceobo.token';
-const WORKSPACE_KEY = 'priceobo.workspaceId';
-
-export function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
-}
-export function setToken(t: string | null) {
-  if (t) localStorage.setItem(TOKEN_KEY, t);
-  else localStorage.removeItem(TOKEN_KEY);
-}
-export function getWorkspaceId() {
-  return localStorage.getItem(WORKSPACE_KEY);
-}
-export function setWorkspaceId(id: string | null) {
-  if (id) localStorage.setItem(WORKSPACE_KEY, id);
-  else localStorage.removeItem(WORKSPACE_KEY);
-}
+const BASE = import.meta.env.VITE_API_URL ?? "";
 
 export class ApiError extends Error {
-  status: number;
-  body: any;
-  constructor(status: number, message: string, body?: any) {
+  constructor(
+    public status: number,
+    message: string,
+    public body?: unknown,
+  ) {
     super(message);
-    this.status = status;
-    this.body = body;
   }
 }
 
-const BASE = (import.meta as any).env?.VITE_API_URL || '';
-
-export async function api<T = any>(
+async function request<T>(
+  method: string,
   path: string,
-  init: RequestInit & { json?: unknown } = {},
+  body?: unknown,
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-    ...(init.headers as Record<string, string> | undefined),
-  };
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const wsId = getWorkspaceId();
-  if (wsId) headers['x-workspace-id'] = wsId;
-
-  let body = init.body;
-  if (init.json !== undefined) {
-    body = JSON.stringify(init.json);
-    headers['Content-Type'] = 'application/json';
-  }
-
-  const res = await fetch(`${BASE}${path}`, { ...init, headers, body });
-  const contentType = res.headers.get('content-type') ?? '';
-  const isJson = contentType.includes('application/json');
-  const payload = isJson ? await res.json() : await res.text();
-
+  const res = await fetch(`${BASE}/api${path}`, {
+    method,
+    credentials: "include",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
-    const msg = (isJson && (payload?.error || payload?.message)) || `HTTP ${res.status}`;
-    if (res.status === 401) {
-      setToken(null);
-      setWorkspaceId(null);
-      if (!location.pathname.startsWith('/sign-in')) location.assign('/sign-in');
-    }
-    throw new ApiError(res.status, msg, payload);
+    throw new ApiError(res.status, data?.error ?? res.statusText, data);
   }
-  return payload as T;
+  return data as T;
+}
+
+export const api = {
+  get: <T>(path: string) => request<T>("GET", path),
+  post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
+  put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
+  patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
+  del: <T>(path: string) => request<T>("DELETE", path),
+};
+
+export function qs(params: Record<string, unknown>): string {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") sp.set(k, String(v));
+  }
+  const s = sp.toString();
+  return s ? `?${s}` : "";
 }

@@ -1,0 +1,48 @@
+.dash-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 16px 0;
+}
+@media (max-width: 960px) {
+  .dash-cols {
+    grid-template-columns: 1fr;
+  }
+}
+.dash-title {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.strong {
+  font-weight: 600;
+}
+.activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.activity-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.activity-item:last-child {
+  border-bottom: none;
+}
+.activity-actor {
+  font-weight: 600;
+}
+.activity-summary {
+  margin-top: 3px;
+  color: var(--text-2);
+}
+.activity-time {
+  white-space: nowrap;
+  font-size: 12px;
+}

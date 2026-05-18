@@ -1,77 +1,47 @@
-import type { FastifyPluginAsync } from 'fastify';
-import { prisma } from '../lib/prisma';
-import { requireWorkspace } from '../lib/auth';
+import type { FastifyInstance } from "fastify";
+import { sql } from "../db.js";
 
-export const dashboardRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook('preHandler', requireWorkspace);
+export default async function dashboardRoutes(app: FastifyInstance) {
+  app.addHook("preHandler", app.requireAuth);
 
-  app.get('/', async (req) => {
-    const workspaceId = req.workspaceId!;
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-    const [skuCount, listingCount, changes, activeSchedules, openAlerts, marketplaces, upcoming, recentAlerts, recentActivity] = await Promise.all([
-      prisma.sKU.count({ where: { workspaceId } }),
-      prisma.listing.count({ where: { sku: { workspaceId } } }),
-      prisma.priceHistory.count({
-        where: { listing: { sku: { workspaceId } }, changedAt: { gte: since } },
-      }),
-      prisma.priceSchedule.count({ where: { workspaceId, status: { in: ['UPCOMING', 'RUNNING'] } } }),
-      prisma.alert.count({ where: { workspaceId, status: 'OPEN' } }),
-      prisma.marketplaceConnection.findMany({
-        where: { workspaceId },
-        include: { _count: { select: { listings: true } } },
-      }),
-      prisma.priceSchedule.findMany({
-        where: { workspaceId, status: 'UPCOMING', startAt: { gte: new Date() } },
-        orderBy: { startAt: 'asc' },
-        take: 5,
-        include: { sku: { include: { product: true } } },
-      }),
-      prisma.alert.findMany({
-        where: { workspaceId, status: 'OPEN' },
-        orderBy: { triggeredAt: 'desc' },
-        take: 5,
-      }),
-      prisma.activity.findMany({
-        where: { workspaceId },
-        orderBy: { createdAt: 'desc' },
-        take: 8,
-        include: { user: true },
-      }),
-    ]);
-
-    return {
-      kpis: {
-        skuCount,
-        listingCount,
-        priceChanges30d: changes,
-        activeSchedules,
-        openAlerts,
-      },
-      marketplaces: marketplaces.map((m) => ({
-        id: m.id,
-        marketplace: m.marketplace,
-        status: m.status,
-        displayName: m.displayName,
-        skuCount: m._count.listings,
-        lastSyncAt: m.lastSyncAt,
-      })),
-      upcomingSchedules: upcoming.map((s) => ({
-        id: s.id,
-        startAt: s.startAt,
-        type: s.type,
-        newPrice: s.newPrice,
-        skuCode: s.sku.sku,
-        productName: s.sku.product.name,
-      })),
-      recentAlerts,
-      recentActivity: recentActivity.map((a) => ({
-        id: a.id,
-        type: a.type,
-        description: a.description,
-        createdAt: a.createdAt,
-        userName: a.user?.name ?? a.user?.email,
-      })),
-    };
+  app.get("/dashboard", async (req) => {
+    const wsId = req.user!.workspaceId;
+    const [stats] = await sql<
+      {
+        skuCount: number;
+        activeSchedules: number;
+        openAlerts: number;
+        revenue30d: number;
+      }[]
+    >`
+      select
+        (select count(*)::int from skus where workspace_id = ${wsId}) as "skuCount",
+        (select count(*)::int from price_schedules
+           where workspace_id = ${wsId} and status in ('scheduled','running')) as "activeSchedules",
+        (select count(*)::int from alerts
+           where workspace_id = ${wsId} and acknowledged = false) as "openAlerts",
+        (select coalesce(sum(sales_30d * price),0)::float8 from skus
+           where workspace_id = ${wsId}) as "revenue30d"
+    `;
+    const recentSchedules = await sql`
+      select ps.id, s.sku, s.title, ps.price::float8 as price,
+             ps.status, ps.created_at as "createdAt"
+      from price_schedules ps
+      join skus s on s.id = ps.sku_id
+      where ps.workspace_id = ${wsId}
+      order by ps.created_at desc limit 6
+    `;
+    const recentActivity = await sql`
+      select id, actor, action, summary, created_at as "createdAt"
+      from activity_log
+      where workspace_id = ${wsId}
+      order by created_at desc limit 8
+    `;
+    const topSkus = await sql`
+      select id, sku, title, sales_30d as "sales30d", price::float8 as price
+      from skus where workspace_id = ${wsId}
+      order by sales_30d desc limit 5
+    `;
+    return { stats, recentSchedules, recentActivity, topSkus };
   });
-};
+}

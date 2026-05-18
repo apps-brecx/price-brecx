@@ -1,0 +1,9 @@
+.settings-tabs {
+  gap: 8px;
+}
+.settings-form {
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}

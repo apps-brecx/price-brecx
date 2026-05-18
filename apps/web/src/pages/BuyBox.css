@@ -1,0 +1,13 @@
+.bb-title {
+  font-weight: 550;
+  font-size: 13px;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bb-msg {
+  color: var(--text-2);
+  font-size: 12.5px;
+  max-width: 420px;
+}
