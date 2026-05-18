@@ -6,7 +6,7 @@ services:
     region: oregon
     plan: starter
     rootDir: .
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @fbm/shared run build && pnpm --filter @fbm/api run build
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @fbm/shared run build && pnpm --filter @fbm/api run build
     preDeployCommand: pnpm --filter @fbm/api run db:migrate
     startCommand: node apps/api/dist/index.js
     healthCheckPath: /health
@@ -47,7 +47,7 @@ services:
     name: priceobo-web
     runtime: static
     rootDir: .
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @fbm/shared run build && pnpm --filter @fbm/web run build
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @fbm/shared run build && pnpm --filter @fbm/web run build
     staticPublishPath: apps/web/dist
     envVars:
       # Set to the API URL once priceobo-api is deployed
