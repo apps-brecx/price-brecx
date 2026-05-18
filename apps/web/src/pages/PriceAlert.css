@@ -1,13 +1,242 @@
-.alert-title {
-  font-weight: 550;
+/* Price Alert / Pricing page — co-located styling, ported from the Priceobo redesign spec. */
+
+/* ============= Price Alert Table ============= */
+.pa-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 13px;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  table-layout: fixed;
 }
-.alert-msg {
+.pa-table thead th {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  padding: 11px 12px;
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--text-2);
-  font-size: 12.5px;
-  max-width: 420px;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+  position: relative;
 }
+.pa-th-inner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+.pa-th-filter {
+  background: transparent;
+  border: none;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-4);
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  transition: all .12s;
+}
+.pa-th-filter:hover {
+  background: var(--surface-3);
+  color: var(--brand-600);
+}
+.pa-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .1s;
+}
+.pa-table tbody tr:last-child { border-bottom: none; }
+.pa-table tbody tr:hover { background: var(--surface-2); }
+.pa-table tbody tr.pa-selected { background: var(--brand-50); }
+.pa-table tbody tr.pa-selected:hover { background: var(--brand-50); }
+.pa-table tbody tr.pa-selected td:first-child { box-shadow: inset 3px 0 0 var(--brand-600); }
+.pa-table tbody td {
+  padding: 14px 10px;
+  vertical-align: top;
+}
+.pa-table tbody td:nth-child(2) { padding-left: 14px; }
+
+/* Product cell */
+.pa-product-cell {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.pa-product-cell img {
+  width: 52px; height: 52px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+.pa-product-cell .pa-product-info {
+  flex: 1;
+  min-width: 0;
+}
+.pa-product-title-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 7px;
+}
+.pa-product-title {
+  font-weight: 650;
+  font-size: 13.5px;
+  color: var(--brand-700);
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+}
+.pa-tags-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.pa-add-tag-btn {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  border: 1px dashed var(--border-strong);
+  background: var(--surface);
+  color: var(--text-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: all .12s;
+}
+.pa-add-tag-btn:hover {
+  border-color: var(--brand-500);
+  color: var(--brand-600);
+  background: var(--brand-50);
+  border-style: solid;
+}
+.pa-product-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  flex-wrap: wrap;
+}
+.pa-sku-copy { font-family: var(--font-mono); }
+.pa-product-meta .pa-meta-pill {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-weight: 500;
+  font-size: 11px;
+}
+
+/* Base price cell */
+.pa-base-cell {
+  text-align: center;
+}
+.pa-base-price-value {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+}
+.pa-base-price-empty {
+  color: var(--text-4);
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 300;
+}
+.pa-base-label {
+  font-size: 10.5px;
+  color: var(--text-3);
+  margin-top: 3px;
+  font-weight: 500;
+}
+.pa-base-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  margin-top: 6px;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.pa-base-edit:hover {
+  background: var(--brand-50);
+  color: var(--brand-700);
+  border-color: var(--brand-300);
+}
+
+/* Channel cells — mini cards */
+.pa-channel-cell {
+  padding: 10px 6px !important;
+  font-variant-numeric: tabular-nums;
+}
+.pa-channel-mini {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: all .12s;
+  min-height: 78px;
+}
+.pa-channel-mini:hover {
+  border-color: var(--brand-300);
+  box-shadow: var(--shadow-xs);
+}
+.pa-channel-mini-empty {
+  background: var(--surface-2);
+  opacity: 0.65;
+  border-style: dashed;
+}
+.pa-channel-mini-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 2px;
+}
+.pa-channel-mini-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.pa-channel-mini-price {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+.pa-channel-mini-price.has-alert { color: var(--danger-fg); }
+.pa-channel-mini-price .pa-dash {
+  color: var(--text-4);
+  font-size: 18px;
+  font-weight: 300;
+}
+.pa-channel-mini-stock {
+  font-size: 11px;
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pa-channel-mini-empty .pa-channel-mini-stock { color: var(--text-4); }
+.pa-channel-alert {
+  margin-left: auto;
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+

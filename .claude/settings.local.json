@@ -5,7 +5,11 @@
       "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);for\\(const t of j.tasks\\){console.log\\(t.taskId,'=> dependsOn:',JSON.stringify\\(t.dependencies\\)\\)}}\\)\")",
       "Bash(pnpm --filter @fbm/shared run build)",
       "Bash(pnpm --filter @fbm/api run build)",
-      "Bash(pnpm --filter @fbm/web run build)"
+      "Bash(pnpm --filter @fbm/web run build)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(npx vite *)",
+      "Bash(git log *)"
     ]
   }
 }

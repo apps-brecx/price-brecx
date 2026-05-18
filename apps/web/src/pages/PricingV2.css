@@ -1,15 +1,437 @@
-.pv2-title {
-  font-weight: 550;
-  font-size: 13px;
-  max-width: 360px;
+/* Pricing v2 page — co-located styling, ported from the Priceobo redesign spec. */
+
+/* ============= Pricing v2 (PriceWave-style grid layout) ============= */
+.pv2-table {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.pv2-sku {
+.pv2-header {
+  display: grid;
+  grid-template-columns: 36px 1fr 110px repeat(6, 130px) 90px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 650;
   color: var(--text-3);
-  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  align-items: center;
+  gap: 10px;
 }
-.strong {
+.pv2-ph-cell {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.pv2-ph-filter {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  color: var(--text-4);
+  display: inline-grid;
+  place-items: center;
+}
+.pv2-ph-filter:hover { color: var(--text-2); }
+.pv2-mp-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.pv2-rows {
+  display: flex;
+  flex-direction: column;
+}
+.pv2-row {
+  display: grid;
+  grid-template-columns: 36px 1fr 110px repeat(6, 130px) 90px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
+  gap: 10px;
+  transition: background .12s;
+}
+.pv2-row:last-child { border-bottom: none; }
+.pv2-row:hover { background: var(--surface-2); }
+.pv2-row.selected {
+  background: var(--brand-50);
+  border-left: 3px solid var(--brand-600);
+  padding-left: 11px;
+}
+
+/* Checkbox */
+.pv2-check {
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--text-4);
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 4px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  transition: all .12s;
+}
+.pv2-check:hover { border-color: var(--brand-500); }
+.pv2-check.checked {
+  background: var(--brand-600);
+  border-color: var(--brand-600);
+}
+.pv2-check.checked::after {
+  content: '';
+  width: 8px;
+  height: 5px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) translate(1px,-1px);
+}
+
+/* Product details cell */
+.pv2-detail {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  align-items: flex-start;
+}
+.pv2-thumb {
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  font-size: 20px;
+  overflow: hidden;
+}
+.pv2-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.pv2-info {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pv2-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pv2-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--brand-700);
+  cursor: pointer;
+  letter-spacing: -0.005em;
+}
+.pv2-name:hover { text-decoration: underline; }
+
+/* Product tags */
+.pv2-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 11px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+}
+.pv2-tag::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.pv2-tag.tag-reg { color: #d97706; border-color: #fde68a; background: #fffbeb; }
+.pv2-tag.tag-reg::before { background: #d97706; }
+.pv2-tag.tag-fbm { color: var(--success-fg); border-color: #a7f3d0; background: var(--success-bg); }
+.pv2-tag.tag-fbm::before { background: var(--success-fg); }
+.pv2-tag.tag-custom { color: var(--text-2); border-color: var(--border); }
+.pv2-tag.tag-custom::before { background: var(--text-3); }
+.pv2-tag.tag-spices { color: var(--danger-fg); border-color: #fecaca; background: var(--danger-bg); }
+.pv2-tag.tag-spices::before { background: var(--danger-fg); }
+.pv2-tag.tag-sf { color: var(--info-fg); border-color: #bfdbfe; background: var(--info-bg); }
+.pv2-tag.tag-sf::before { background: var(--info-fg); }
+.pv2-tag-plus {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px dashed var(--text-4);
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all .12s;
+}
+.pv2-tag-plus:hover {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+/* Product meta row */
+.pv2-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.pv2-sku-link {
+  font-size: 11.5px;
+  color: var(--brand-700);
+  font-family: var(--font-mono);
+  text-decoration: underline;
+  cursor: pointer;
+  font-weight: 500;
+}
+.pv2-meta-chip {
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
+.pv2-meta-chip.shelves { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.pv2-meta-chip.shelves-neg { background: var(--danger-bg); color: var(--danger-fg); border-color: #fecaca; }
+.pv2-meta-chip.fbm { background: var(--info-bg); color: var(--info-fg); border-color: #bfdbfe; }
+
+/* Base Price column */
+.pv2-base {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding-top: 6px;
+}
+.pv2-base-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.pv2-base-edit {
+  color: var(--text-3);
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+  transition: color .12s;
+}
+.pv2-base-edit:hover { color: var(--text); }
+.pv2-base-label {
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-weight: 500;
+}
+.pv2-base-empty {
+  font-size: 18px;
+  color: var(--text-4);
+}
+
+/* Per-channel mini card */
+.pv2-mp-cell {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px 10px;
+  min-height: 68px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: all .12s;
+}
+.pv2-mp-cell:hover {
+  border-color: var(--text-3);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+.pv2-mp-cell.empty {
+  background: var(--surface-2);
+  border-style: dashed;
+}
+.pv2-mp-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: var(--text-2);
   font-weight: 600;
 }
+.pv2-mp-head .mp-icon-sm {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 7px;
+  color: #fff;
+  font-weight: 700;
+}
+.pv2-mp-price {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.pv2-mp-price.high { color: var(--danger-fg); }
+.pv2-mp-stock-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--text-3);
+  margin-top: auto;
+}
+.pv2-mp-stock-row .stock-label { font-weight: 600; }
+.pv2-mp-stock-row .comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.pv2-mp-stock-row .comments svg { width: 10px; height: 10px; }
+.pv2-mp-empty-mark {
+  font-size: 18px;
+  color: var(--text-4);
+  align-self: center;
+  margin: auto 0;
+}
+
+/* "+N more" extra cell */
+.pv2-mp-more {
+  background: var(--brand-50);
+  border: 1px dashed var(--brand-300);
+  border-radius: 7px;
+  padding: 8px 10px;
+  min-height: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all .12s;
+}
+.pv2-mp-more:hover {
+  background: var(--brand-100);
+  border-color: var(--brand-500);
+}
+.pv2-mp-more-count {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--brand-700);
+  line-height: 1;
+}
+.pv2-mp-more-label {
+  font-size: 10.5px;
+  color: var(--brand-700);
+  font-weight: 600;
+  margin-top: 4px;
+}
+.pv2-mp-more.open {
+  background: var(--brand-100);
+  border-style: solid;
+  border-color: var(--brand-500);
+}
+
+/* Extra drawer (expanded below row) */
+.pv2-extra-drawer {
+  display: none;
+  background: #fafbff;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 18px;
+}
+.pv2-extra-drawer.open {
+  display: block;
+}
+.pv2-extra-drawer-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pv2-extra-drawer-title .badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--brand-50);
+  color: var(--brand-700);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  border: 1px solid var(--brand-200);
+}
+.pv2-extra-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+.pv2-extra-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: all .12s;
+}
+.pv2-extra-card:hover {
+  border-color: var(--text-3);
+  box-shadow: var(--shadow-xs);
+}
+.pv2-extra-card-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--text);
+}
+.pv2-extra-card-head .pv2-extra-note {
+  color: var(--text-3);
+  font-weight: 500;
+  font-size: 10.5px;
+}
+.pv2-extra-card-price {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.pv2-extra-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+.pv2-extra-card-foot .stock-label { font-weight: 600; }
+.pv2-extra-card-foot .comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.pv2-extra-card-foot .comments svg { width: 10px; height: 10px; }
+
+

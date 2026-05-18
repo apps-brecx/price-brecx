@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { Logo } from "../components/Logo";
 import "./Auth.css";
 
 export function SignUp() {
@@ -40,7 +41,7 @@ export function SignUp() {
     <div className="auth-shell">
       <form className="auth-card" onSubmit={submit}>
         <div className="auth-brand">
-          <span className="logo-dot" />
+          <Logo size={24} />
           Priceobo
         </div>
         <h1>Create your workspace</h1>
@@ -50,12 +51,12 @@ export function SignUp() {
 
         <div className="field">
           <label>Your name</label>
-          <input className="input" required value={form.name} onChange={set("name")} />
+          <input className="form-control" required value={form.name} onChange={set("name")} />
         </div>
         <div className="field">
           <label>Workspace name</label>
           <input
-            className="input"
+            className="form-control"
             required
             value={form.workspaceName}
             onChange={set("workspaceName")}
@@ -64,7 +65,7 @@ export function SignUp() {
         <div className="field">
           <label>Email</label>
           <input
-            className="input"
+            className="form-control"
             type="email"
             required
             value={form.email}
@@ -74,7 +75,7 @@ export function SignUp() {
         <div className="field">
           <label>Password</label>
           <input
-            className="input"
+            className="form-control"
             type="password"
             required
             minLength={8}

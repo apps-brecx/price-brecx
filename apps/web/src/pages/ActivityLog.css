@@ -1,11 +1,79 @@
-.pager {
-  display: flex;
+/* Activity Log page — co-located styling, ported from the Priceobo redesign spec. */
+
+/* ============= Activity Log Page ============= */
+.act-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+.act-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.act-table thead th {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  padding: 11px 16px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.act-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background .1s;
+}
+.act-table tbody tr:last-child { border-bottom: none; }
+.act-table tbody tr:hover { background: var(--surface-2); }
+.act-table tbody td {
+  padding: 13px 16px;
+  vertical-align: middle;
+}
+.act-time {
+  color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.act-product {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+.act-product-sku {
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  margin-top: 1px;
+}
+.act-mp-chip {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 14px;
-  font-size: 12.5px;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 550;
 }
-.pager-btns {
-  display: flex;
-  gap: 8px;
+.act-mp-dot {
+  width: 8px; height: 8px;
+  border-radius: 2px;
 }
+.act-price-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.act-price-old {
+  color: var(--text-3);
+  text-decoration: line-through;
+  font-size: 11.5px;
+}
+.act-price-new { font-weight: 700; }
+.act-price-new.down { color: var(--danger-fg); }
+.act-price-new.up { color: var(--success-fg); }
+
+

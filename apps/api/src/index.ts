@@ -26,6 +26,7 @@ import activityRoutes from "./routes/activity.js";
 import historyRoutes from "./routes/history.js";
 import reportRoutes from "./routes/reports.js";
 import dashboardRoutes from "./routes/dashboard.js";
+import navCountsRoutes from "./routes/navCounts.js";
 import marketplaceRoutes from "./routes/marketplaces.js";
 import inventoryRoutes from "./routes/inventory.js";
 import settingsRoutes from "./routes/settings.js";
@@ -75,6 +76,7 @@ const api: FastifyPluginAsync = async (instance: FastifyInstance) => {
   await instance.register(historyRoutes);
   await instance.register(reportRoutes);
   await instance.register(dashboardRoutes);
+  await instance.register(navCountsRoutes);
   await instance.register(marketplaceRoutes);
   await instance.register(inventoryRoutes);
   await instance.register(settingsRoutes);

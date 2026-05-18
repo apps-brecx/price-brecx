@@ -1,4 +1,35 @@
-.tbl .mono {
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12.5px;
+/* Status page — co-located styling, ported from the Priceobo redesign spec. */
+
+/* ============= Status Table ============= */
+.status-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  table-layout: fixed;
 }
+.status-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.status-table thead th {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  padding: 11px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+/* Add extra gap between Created (8th) and Status (9th) columns */
+.status-table thead th:nth-child(9),
+.status-table tbody td:nth-child(9) {
+  padding-left: 24px;
+}
+
+

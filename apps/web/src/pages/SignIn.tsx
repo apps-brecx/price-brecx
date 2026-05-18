@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { Logo } from "../components/Logo";
 import "./Auth.css";
 
 export function SignIn() {
@@ -31,7 +32,7 @@ export function SignIn() {
     <div className="auth-shell">
       <form className="auth-card" onSubmit={submit}>
         <div className="auth-brand">
-          <span className="logo-dot" />
+          <Logo size={24} />
           Priceobo
         </div>
         <h1>Welcome back</h1>
@@ -42,7 +43,7 @@ export function SignIn() {
         <div className="field">
           <label>Email</label>
           <input
-            className="input"
+            className="form-control"
             type="email"
             required
             value={email}
@@ -52,7 +53,7 @@ export function SignIn() {
         <div className="field">
           <label>Password</label>
           <input
-            className="input"
+            className="form-control"
             type="password"
             required
             value={password}

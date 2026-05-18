@@ -51,4 +51,8 @@
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-xl: 18px;
+
+  /* Mono font — referenced as var(--font-mono) throughout the redesign CSS
+     (the original HTML used it without defining it). */
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
 }

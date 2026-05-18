@@ -1,3 +1,5 @@
+/* Buy Box page — co-located styling. */
+
 .bb-title {
   font-weight: 550;
   font-size: 13px;
@@ -11,3 +13,7 @@
   font-size: 12.5px;
   max-width: 420px;
 }
+
+/* Buy box win/loss status colors (redesign spec) */
+.bb-status-winning { color: var(--success-fg); }
+.bb-status-losing { color: var(--danger-fg); }
