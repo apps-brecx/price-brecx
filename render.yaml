@@ -6,9 +6,11 @@ services:
     region: oregon
     plan: starter
     rootDir: .
+    # npm -g pnpm (not `corepack enable`): on Render's newer Node images
+    # `/usr/bin` is read-only and corepack enable crashes with EROFS.
     # --prod=false: NODE_ENV=production makes pnpm skip devDependencies
     # (typescript, @types/*); the build needs them, so force-install dev deps.
-    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm --filter @fbm/shared run build && pnpm --filter @fbm/api run build
+    buildCommand: npm install -g pnpm@9.12.0 && pnpm install --frozen-lockfile --prod=false && pnpm --filter @fbm/shared run build && pnpm --filter @fbm/api run build
     preDeployCommand: pnpm --filter @fbm/api run db:migrate
     startCommand: node apps/api/dist/index.js
     healthCheckPath: /health
@@ -49,7 +51,7 @@ services:
     name: priceobo-web
     runtime: static
     rootDir: .
-    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm --filter @fbm/shared run build && pnpm --filter @fbm/web run build
+    buildCommand: npm install -g pnpm@9.12.0 && pnpm install --frozen-lockfile --prod=false && pnpm --filter @fbm/shared run build && pnpm --filter @fbm/web run build
     staticPublishPath: apps/web/dist
     envVars:
       # Set to the API URL once priceobo-api is deployed
