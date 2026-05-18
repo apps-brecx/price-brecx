@@ -1,38 +1,56 @@
 services:
-  # ============ API (Fastify + Prisma) ============
+  # ============ API — Fastify + postgres.js + pg-boss ============
   - type: web
     name: priceobo-api
     runtime: node
     region: oregon
     plan: starter
-    rootDir: apps/api
-    buildCommand: npm install --include=dev && npx prisma generate && npx tsc -p tsconfig.json && npx prisma migrate deploy
-    startCommand: node dist/index.js
+    rootDir: .
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @fbm/shared run build && pnpm --filter @fbm/api run build
+    preDeployCommand: pnpm --filter @fbm/api run db:migrate
+    startCommand: node apps/api/dist/index.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 4000
-      # Set DATABASE_URL to your Neon Postgres connection string (use the pooled URL with sslmode=require).
+      - key: COOKIE_SECURE
+        value: "true"
+      # Neon pooled connection string — include ?sslmode=require
       - key: DATABASE_URL
         sync: false
-      - key: JWT_SECRET
+      - key: SESSION_SECRET
         generateValue: true
-      # Comma-separated list of allowed web origins. Update once the static site URL is known.
+      # Comma-separated allowed web origins (set to the static site URL)
       - key: CORS_ORIGIN
         sync: false
+      - key: SENTRY_DSN
+        sync: false
+      # Optional: SMTP_*, R2_*, SPAPI_* — see apps/api/.env.example
+      - key: SPAPI_REFRESH_TOKEN
+        sync: false
+      - key: SPAPI_LWA_APP_ID
+        sync: false
+      - key: SPAPI_LWA_CLIENT_SECRET
+        sync: false
+      - key: SPAPI_SELLER_ID
+        sync: false
+      - key: SPAPI_MARKETPLACE_ID
+        sync: false
 
-  # ============ Web (Vite + React, static) ============
+  # ============ Web — React + Vite (static) ============
   - type: web
     name: priceobo-web
     runtime: static
-    rootDir: apps/web
-    buildCommand: npm install && npm run build
-    staticPublishPath: dist
+    rootDir: .
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @fbm/shared run build && pnpm --filter @fbm/web run build
+    staticPublishPath: apps/web/dist
     envVars:
-      # Set this to the API URL after `priceobo-api` is created (e.g. https://priceobo-api.onrender.com).
+      # Set to the API URL once priceobo-api is deployed
       - key: VITE_API_URL
+        sync: false
+      - key: VITE_SENTRY_DSN
         sync: false
     routes:
       - type: rewrite

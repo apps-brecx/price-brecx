@@ -1,0 +1,8 @@
+.auto-name {
+  font-weight: 550;
+  font-size: 13px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

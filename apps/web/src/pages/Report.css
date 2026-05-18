@@ -1,0 +1,12 @@
+.report-title {
+  font-weight: 550;
+  font-size: 13px;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.report-sku {
+  color: var(--text-3);
+  margin-top: 3px;
+}

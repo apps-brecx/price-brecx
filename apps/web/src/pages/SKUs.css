@@ -1,0 +1,37 @@
+.sku-title {
+  font-weight: 550;
+  font-size: 13px;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sku-codes {
+  color: var(--text-3);
+  margin-top: 3px;
+}
+.strong {
+  font-weight: 600;
+}
+.star {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--border-strong);
+  font-size: 15px;
+  line-height: 1;
+}
+.star.on {
+  color: #f59e0b;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  font-size: 12.5px;
+}
+.pager-btns {
+  display: flex;
+  gap: 8px;
+}

@@ -1,114 +1,169 @@
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, DollarSign } from 'lucide-react';
-import { api } from '@/lib/api';
-import { MarketplaceLogo, MarketplacePill } from '@/components/ui/MarketplacePill';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { formatMoney, formatNumber, marketplaceMeta } from '@/lib/utils';
+import { useState } from "react";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
+import type { Sku, Paginated } from "@fbm/shared";
+import { CHANNEL_LABELS } from "@fbm/shared";
+import { api, qs } from "../lib/api";
+import { money, num } from "../lib/format";
+import { PageHeader } from "../components/PageHeader";
+import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
+import { Modal } from "../components/Modal";
+import "./PricingV2.css";
 
-type Listing = {
-  id: string;
-  currentPrice: string;
-  stockAvailable: number;
-  connection: { marketplace: string };
-  sku: { id: string; sku: string; product: { id: string; name: string; imageUrl?: string | null } };
-};
+const PAGE_SIZE = 50;
 
-const MAIN = 3;
+function margin(s: Sku): string {
+  if (s.basePrice && s.cost) {
+    return (((s.basePrice - s.cost) / s.basePrice) * 100).toFixed(1) + "%";
+  }
+  return "—";
+}
 
-export default function PricingV2() {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const { data, isLoading } = useQuery<Listing[]>({
-    queryKey: ['listings'],
-    queryFn: () => api('/api/listings'),
+export function PricingV2() {
+  const qc = useQueryClient();
+  const [priceFor, setPriceFor] = useState<Sku | null>(null);
+
+  const query = useQuery({
+    queryKey: ["skus", { pageSize: PAGE_SIZE }],
+    queryFn: () =>
+      api.get<Paginated<Sku>>(`/skus${qs({ pageSize: PAGE_SIZE })}`),
+    placeholderData: keepPreviousData,
   });
 
-  const groups = useMemo(() => {
-    const map = new Map<string, { product: Listing['sku']['product']; rows: Listing[] }>();
-    (data ?? []).forEach((l) => {
-      const k = l.sku.product.id;
-      const g = map.get(k) ?? { product: l.sku.product, rows: [] };
-      g.rows.push(l);
-      map.set(k, g);
-    });
-    return Array.from(map.values()).sort((a, b) => a.product.name.localeCompare(b.product.name));
-  }, [data]);
+  const priceMut = useMutation({
+    mutationFn: (vars: { id: string; price: number }) =>
+      api.patch(`/skus/${vars.id}`, { price: vars.price }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["skus"] });
+      setPriceFor(null);
+    },
+  });
+
+  const data = query.data;
 
   return (
-    <div className="space-y-3">
-      {isLoading ? (
-        <div className="card p-6 text-sm text-ink-3">Loading…</div>
-      ) : groups.length === 0 ? (
-        <div className="card">
-          <EmptyState icon={DollarSign} title="No listings" description="Connect marketplaces and import SKUs to see them here." />
-        </div>
+    <div>
+      <PageHeader
+        title="Pricing Workspace"
+        subtitle="Review margins and adjust prices across every listing"
+      />
+
+      {query.isLoading ? (
+        <Loading />
+      ) : query.isError ? (
+        <ErrorState />
+      ) : !data || data.items.length === 0 ? (
+        <EmptyState
+          title="No products to price"
+          message="Add SKUs or connect a marketplace to start managing prices."
+        />
       ) : (
-        groups.map((g) => {
-          const visible = g.rows.slice(0, MAIN);
-          const more = g.rows.slice(MAIN);
-          const isOpen = expanded.has(g.product.id);
-          return (
-            <div key={g.product.id} className="card overflow-hidden">
-              <div className="flex items-center gap-4 px-4 py-3">
-                {g.product.imageUrl ? (
-                  <img src={g.product.imageUrl} alt="" className="h-12 w-12 rounded-md object-cover" />
-                ) : (
-                  <div className="grid h-12 w-12 place-items-center rounded-md bg-surface-2 text-ink-3">
-                    <DollarSign size={16} />
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold">{g.product.name}</div>
-                  <div className="text-[12px] text-ink-3">{g.rows.length} listing(s)</div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {visible.map((l) => (
-                    <PriceCell key={l.id} l={l} />
-                  ))}
-                  {more.length > 0 && (
+        <div className="tbl-wrap">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Channel</th>
+                <th className="right">Current Price</th>
+                <th className="right">Base Price</th>
+                <th className="right">Cost</th>
+                <th className="right">Margin</th>
+                <th className="right">Stock</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((s) => (
+                <tr key={s.id}>
+                  <td>
+                    <div className="pv2-title">{s.title}</div>
+                    <div className="pv2-sku mono">{s.sku}</div>
+                  </td>
+                  <td>
+                    <span className="badge badge-neutral">
+                      {CHANNEL_LABELS[s.channel]}
+                    </span>
+                  </td>
+                  <td className="right strong">{money(s.price)}</td>
+                  <td className="right">{money(s.basePrice)}</td>
+                  <td className="right">{money(s.cost)}</td>
+                  <td className="right">{margin(s)}</td>
+                  <td className="right">{num(s.stock)}</td>
+                  <td className="right">
                     <button
-                      className="filter-chip"
-                      onClick={() =>
-                        setExpanded((prev) => {
-                          const n = new Set(prev);
-                          n.has(g.product.id) ? n.delete(g.product.id) : n.add(g.product.id);
-                          return n;
-                        })
-                      }
+                      className="btn btn-sm btn-secondary"
+                      onClick={() => setPriceFor(s)}
                     >
-                      {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                      +{more.length} more
+                      Set price
                     </button>
-                  )}
-                </div>
-              </div>
-              {isOpen && more.length > 0 && (
-                <div className="border-t bg-surface-2 px-4 py-3" style={{ borderColor: 'var(--border)' }}>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                    {more.map((l) => (
-                      <PriceCell key={l.id} l={l} block />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
+
+      <SetPriceModal
+        sku={priceFor}
+        onClose={() => setPriceFor(null)}
+        onSubmit={(price) =>
+          priceFor && priceMut.mutate({ id: priceFor.id, price })
+        }
+        busy={priceMut.isPending}
+      />
     </div>
   );
 }
 
-function PriceCell({ l, block }: { l: Listing; block?: boolean }) {
-  const m = marketplaceMeta(l.connection.marketplace);
+function SetPriceModal({
+  sku,
+  onClose,
+  onSubmit,
+  busy,
+}: {
+  sku: Sku | null;
+  onClose: () => void;
+  onSubmit: (price: number) => void;
+  busy: boolean;
+}) {
+  const [price, setPrice] = useState(0);
   return (
-    <div className={`flex items-center gap-2 rounded-md border bg-white px-2.5 py-1.5 ${block ? 'w-full' : ''}`} style={{ borderColor: 'var(--border)' }}>
-      <MarketplaceLogo id={l.connection.marketplace} size={22} />
-      <div className="min-w-0">
-        <div className="text-[11px] text-ink-3">{m.label}</div>
-        <div className="text-[13px] font-semibold leading-tight">{formatMoney(l.currentPrice)}</div>
+    <Modal
+      open={!!sku}
+      title={sku ? `Set price · ${sku.sku}` : ""}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={busy || !price}
+            onClick={() => onSubmit(price)}
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </>
+      }
+    >
+      <p className="muted" style={{ fontSize: 12 }}>
+        Current price {sku ? money(sku.price) : ""}.
+      </p>
+      <div className="field">
+        <label>New price</label>
+        <input
+          className="input"
+          type="number"
+          step="0.01"
+          onChange={(e) => setPrice(Number(e.target.value))}
+        />
       </div>
-      <div className="ml-auto text-right text-[11px] text-ink-3">{formatNumber(l.stockAvailable)} in stock</div>
-    </div>
+    </Modal>
   );
 }

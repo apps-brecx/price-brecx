@@ -1,87 +1,71 @@
-import type { FastifyPluginAsync } from 'fastify';
-import { z } from 'zod';
-import { prisma } from '../lib/prisma';
-import { requireWorkspace } from '../lib/auth';
-import { logActivity } from '../lib/activity';
+import type { FastifyInstance } from "fastify";
+import { automationRuleCreateSchema } from "@fbm/shared";
+import { sql, jsonb } from "../db.js";
+import { recordActivity } from "../lib/activity.js";
 
-const createSchema = z.object({
-  name: z.string().min(1),
-  type: z.enum(['COMPETITOR_BASED', 'STOCK_BASED', 'TIME_BASED', 'BUYBOX', 'CUSTOM']),
-  status: z.enum(['ACTIVE', 'PAUSED', 'DRAFT']).optional(),
-  matchMode: z.enum(['ALL', 'ANY']).optional(),
-  conditions: z.array(z.any()),
-  adjustment: z.object({ type: z.enum(['percent', 'amount', 'absolute']), value: z.number() }),
-  schedule: z.any().optional(),
-  affectedSkus: z.array(z.string()),
-});
+const cols = sql`
+  id, name, type, interval_hours as "intervalHours", amount,
+  active, sku_ids as "skuIds", created_by as "createdBy",
+  created_at as "createdAt"
+`;
 
-export const automationRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook('preHandler', requireWorkspace);
+export default async function automationRoutes(app: FastifyInstance) {
+  app.addHook("preHandler", app.requireAuth);
 
-  app.get('/', async (req) => {
-    return prisma.automationRule.findMany({
-      where: { workspaceId: req.workspaceId! },
-      orderBy: { createdAt: 'desc' },
+  app.get("/automation-rules", async (req) => {
+    const items = await sql`
+      select ${cols} from automation_rules
+      where workspace_id = ${req.user!.workspaceId}
+      order by created_at desc
+    `;
+    return { items, total: items.length };
+  });
+
+  app.post("/automation-rules", async (req, reply) => {
+    const body = automationRuleCreateSchema.parse(req.body);
+    const [row] = await sql`
+      insert into automation_rules
+        (workspace_id, name, type, interval_hours, amount, active, sku_ids, created_by)
+      values (
+        ${req.user!.workspaceId}, ${body.name}, ${body.type},
+        ${body.intervalHours ?? null}, ${body.amount}, ${body.active},
+        ${jsonb(body.skuIds)}, ${req.user!.email}
+      )
+      returning ${cols}
+    `;
+    await recordActivity({
+      workspaceId: req.user!.workspaceId,
+      actor: req.user!.email,
+      action: "created",
+      entityType: "automation_rule",
+      entityId: row.id,
+      summary: `Automation rule "${body.name}" created`,
     });
+    return reply.code(201).send(row);
   });
 
-  app.get('/:id', async (req, reply) => {
+  app.patch("/automation-rules/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const rule = await prisma.automationRule.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!rule) return reply.code(404).send({ error: 'Not found' });
-    return rule;
+    const { active } = req.body as { active?: boolean };
+    if (typeof active !== "boolean")
+      return reply.code(400).send({ error: "active required" });
+    const [row] = await sql`
+      update automation_rules set active = ${active}
+      where id = ${id} and workspace_id = ${req.user!.workspaceId}
+      returning ${cols}
+    `;
+    if (!row) return reply.code(404).send({ error: "Not found" });
+    return row;
   });
 
-  app.post('/', async (req) => {
-    const body = createSchema.parse(req.body);
-    const rule = await prisma.automationRule.create({
-      data: {
-        ...body,
-        workspaceId: req.workspaceId!,
-        createdBy: req.userId!,
-        status: body.status ?? 'ACTIVE',
-        matchMode: body.matchMode ?? 'ALL',
-      },
-    });
-    await logActivity({
-      workspaceId: req.workspaceId!,
-      userId: req.userId,
-      type: 'automation.created',
-      description: `Created automation "${body.name}"`,
-    });
-    return rule;
-  });
-
-  app.patch('/:id', async (req, reply) => {
+  app.delete("/automation-rules/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const existing = await prisma.automationRule.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!existing) return reply.code(404).send({ error: 'Not found' });
-    const body = createSchema.partial().parse(req.body);
-    return prisma.automationRule.update({ where: { id }, data: body });
-  });
-
-  app.delete('/:id', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const existing = await prisma.automationRule.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!existing) return reply.code(404).send({ error: 'Not found' });
-    await prisma.automationRule.delete({ where: { id } });
+    const rows = await sql`
+      delete from automation_rules
+      where id = ${id} and workspace_id = ${req.user!.workspaceId}
+      returning name
+    `;
+    if (!rows.length) return reply.code(404).send({ error: "Not found" });
     return { ok: true };
   });
-
-  app.post('/:id/run', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const rule = await prisma.automationRule.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!rule) return reply.code(404).send({ error: 'Not found' });
-    const updated = await prisma.automationRule.update({
-      where: { id },
-      data: { lastRunAt: new Date() },
-    });
-    await logActivity({
-      workspaceId: req.workspaceId!,
-      userId: req.userId,
-      type: 'automation.run',
-      description: `Ran automation "${rule.name}"`,
-    });
-    return updated;
-  });
-};
+}

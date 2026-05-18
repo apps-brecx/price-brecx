@@ -1,0 +1,18 @@
+.inv-title {
+  font-weight: 550;
+  font-size: 13px;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inv-sku {
+  font-size: 12px;
+  margin-top: 3px;
+}
+.inv-stock-tag {
+  margin-left: 8px;
+}
+.strong {
+  font-weight: 600;
+}

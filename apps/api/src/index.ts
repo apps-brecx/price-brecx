@@ -1,84 +1,122 @@
-import Fastify from 'fastify';
-import cors from '@fastify/cors';
-import helmet from '@fastify/helmet';
-import jwt from '@fastify/jwt';
-import { env } from './lib/env';
-import './lib/types';
+import Fastify, { type FastifyInstance, type FastifyPluginAsync } from "fastify";
+import cookie from "@fastify/cookie";
+import cors from "@fastify/cors";
+import websocket from "@fastify/websocket";
+import { ZodError } from "zod";
+import { SESSION_COOKIE } from "@fbm/shared";
 
-import { authRoutes } from './routes/auth';
-import { meRoutes } from './routes/me';
-import { workspaceRoutes } from './routes/workspaces';
-import { marketplaceRoutes } from './routes/marketplaces';
-import { productRoutes } from './routes/products';
-import { skuRoutes } from './routes/skus';
-import { listingRoutes } from './routes/listings';
-import { inventoryRoutes } from './routes/inventory';
-import { scheduleRoutes } from './routes/schedules';
-import { automationRoutes } from './routes/automation';
-import { buyboxRoutes } from './routes/buybox';
-import { alertRoutes } from './routes/alerts';
-import { notificationRuleRoutes } from './routes/notificationRules';
-import { reportRoutes } from './routes/reports';
-import { activityRoutes } from './routes/activity';
-import { tagRoutes } from './routes/tags';
-import { teamRoutes } from './routes/team';
-import { apiKeyRoutes } from './routes/apiKeys';
-import { webhookRoutes } from './routes/webhooks';
-import { dashboardRoutes } from './routes/dashboard';
+import { env } from "./env.js";
+import { logger } from "./logger.js";
+import { initSentry, captureError } from "./sentry.js";
+import { pingDatabase } from "./db.js";
+import { startJobs, stopJobs } from "./jobs.js";
+import { addSocket } from "./ws.js";
+import { resolveSession } from "./auth/sessions.js";
+import authPlugin from "./auth/plugin.js";
 
-async function buildServer() {
-  const app = Fastify({
-    logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
-  });
+import authRoutes from "./routes/auth.js";
+import meRoutes from "./routes/me.js";
+import skuRoutes from "./routes/skus.js";
+import productRoutes from "./routes/products.js";
+import scheduleRoutes from "./routes/schedules.js";
+import automationRoutes from "./routes/automation.js";
+import alertRoutes from "./routes/alerts.js";
+import notificationRuleRoutes from "./routes/notificationRules.js";
+import activityRoutes from "./routes/activity.js";
+import historyRoutes from "./routes/history.js";
+import reportRoutes from "./routes/reports.js";
+import dashboardRoutes from "./routes/dashboard.js";
+import marketplaceRoutes from "./routes/marketplaces.js";
+import inventoryRoutes from "./routes/inventory.js";
+import settingsRoutes from "./routes/settings.js";
+import uploadRoutes from "./routes/uploads.js";
 
-  await app.register(helmet, { contentSecurityPolicy: false });
-  await app.register(cors, {
-    origin: env.CORS_ORIGIN.split(',').map((s) => s.trim()),
-    credentials: true,
-  });
-  await app.register(jwt, { secret: env.JWT_SECRET });
+initSentry();
 
-  app.get('/', async () => ({ message: 'API is running' }));
-  app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+const app = Fastify({ logger, trustProxy: true });
 
-  await app.register(authRoutes, { prefix: '/api/auth' });
-  await app.register(meRoutes, { prefix: '/api/me' });
-  await app.register(workspaceRoutes, { prefix: '/api/workspaces' });
-  await app.register(dashboardRoutes, { prefix: '/api/dashboard' });
-  await app.register(marketplaceRoutes, { prefix: '/api/marketplaces' });
-  await app.register(productRoutes, { prefix: '/api/products' });
-  await app.register(skuRoutes, { prefix: '/api/skus' });
-  await app.register(listingRoutes, { prefix: '/api/listings' });
-  await app.register(inventoryRoutes, { prefix: '/api/inventory' });
-  await app.register(scheduleRoutes, { prefix: '/api/schedules' });
-  await app.register(automationRoutes, { prefix: '/api/automation' });
-  await app.register(buyboxRoutes, { prefix: '/api/buybox' });
-  await app.register(alertRoutes, { prefix: '/api/alerts' });
-  await app.register(notificationRuleRoutes, { prefix: '/api/notification-rules' });
-  await app.register(reportRoutes, { prefix: '/api/reports' });
-  await app.register(activityRoutes, { prefix: '/api/activity-log' });
-  await app.register(tagRoutes, { prefix: '/api/tags' });
-  await app.register(teamRoutes, { prefix: '/api/team' });
-  await app.register(apiKeyRoutes, { prefix: '/api/api-keys' });
-  await app.register(webhookRoutes, { prefix: '/api/webhooks' });
+await app.register(cors, {
+  origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()),
+  credentials: true,
+});
+await app.register(cookie, { secret: env.SESSION_SECRET });
+await app.register(websocket);
+await app.register(authPlugin);
 
-  app.setErrorHandler((err, _req, reply) => {
-    app.log.error(err);
-    const status = (err as any).statusCode ?? 500;
-    reply.code(status).send({ error: (err as Error).message ?? 'Internal error' });
-  });
-
-  return app;
-}
-
-async function start() {
-  const app = await buildServer();
-  try {
-    await app.listen({ port: env.PORT, host: '0.0.0.0' });
-  } catch (err) {
-    app.log.error(err);
-    process.exit(1);
+app.setErrorHandler((err, _req, reply) => {
+  if (err instanceof ZodError) {
+    return reply.code(400).send({ error: "Validation failed", issues: err.issues });
   }
+  logger.error({ err }, "request error");
+  captureError(err);
+  const status = (err as { statusCode?: number }).statusCode ?? 500;
+  return reply
+    .code(status)
+    .send({ error: status >= 500 ? "Internal Server Error" : err.message });
+});
+
+app.get("/health", async () => ({
+  ok: true,
+  db: await pingDatabase(),
+  ts: new Date().toISOString(),
+}));
+app.get("/", async () => ({ service: "fbm-api", status: "running" }));
+
+const api: FastifyPluginAsync = async (instance: FastifyInstance) => {
+  await instance.register(authRoutes);
+  await instance.register(meRoutes);
+  await instance.register(skuRoutes);
+  await instance.register(productRoutes);
+  await instance.register(scheduleRoutes);
+  await instance.register(automationRoutes);
+  await instance.register(alertRoutes);
+  await instance.register(notificationRuleRoutes);
+  await instance.register(activityRoutes);
+  await instance.register(historyRoutes);
+  await instance.register(reportRoutes);
+  await instance.register(dashboardRoutes);
+  await instance.register(marketplaceRoutes);
+  await instance.register(inventoryRoutes);
+  await instance.register(settingsRoutes);
+  await instance.register(uploadRoutes);
+};
+await app.register(api, { prefix: "/api" });
+
+// Realtime channel — authenticated via the session cookie.
+app.register(async (instance) => {
+  instance.get("/ws", { websocket: true }, async (socket, req) => {
+    const token = req.cookies?.[SESSION_COOKIE];
+    const user = await resolveSession(token);
+    if (!user) {
+      socket.close(4401, "Unauthorized");
+      return;
+    }
+    addSocket(user.workspaceId, socket);
+    socket.send(JSON.stringify({ type: "connected" }));
+  });
+});
+
+async function main() {
+  try {
+    await startJobs();
+  } catch (err) {
+    logger.error({ err }, "pg-boss failed to start (continuing without queue)");
+  }
+  await app.listen({ port: env.PORT, host: env.HOST });
+  logger.info(`API listening on ${env.HOST}:${env.PORT} (${env.NODE_ENV})`);
 }
 
-start();
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, async () => {
+    logger.info(`${sig} received, shutting down`);
+    await stopJobs().catch(() => {});
+    await app.close();
+    process.exit(0);
+  });
+}
+
+main().catch((err) => {
+  logger.error({ err }, "fatal startup error");
+  captureError(err);
+  process.exit(1);
+});

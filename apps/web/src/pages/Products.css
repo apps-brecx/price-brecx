@@ -1,0 +1,10 @@
+.prod-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+.prod-desc {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

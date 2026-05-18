@@ -1,177 +1,148 @@
-import type { FastifyPluginAsync } from 'fastify';
-import { z } from 'zod';
-import { prisma } from '../lib/prisma';
-import { requireWorkspace } from '../lib/auth';
-import { logActivity } from '../lib/activity';
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import { skuCreateSchema, skuUpdateSchema } from "@fbm/shared";
+import { sql, jsonb } from "../db.js";
+import { recordActivity } from "../lib/activity.js";
 
-const createSchema = z.object({
-  productId: z.string(),
-  sku: z.string().min(1),
-  asin: z.string().optional(),
-  upc: z.string().optional(),
-  status: z.enum(['ACTIVE', 'INACTIVE', 'PENDING']).optional(),
-  favorite: z.boolean().optional(),
-  fbaPrice: z.number().optional(),
-  fbmPrice: z.number().optional(),
-  shelves: z.number().int().optional(),
-  fbmCount: z.number().int().optional(),
+const listQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(50),
+  search: z.string().optional(),
+  status: z.string().optional(),
+  channel: z.string().optional(),
+  favorite: z.coerce.boolean().optional(),
 });
 
-const bulkSchema = z.object({
-  skuIds: z.array(z.string()).min(1),
-  action: z.enum(['delete', 'activate', 'deactivate', 'favorite', 'unfavorite', 'tag', 'untag']),
-  tagId: z.string().optional(),
-});
+const selectCols = sql`
+  id, sku, asin, title, image_url as "imageUrl", channel,
+  price::float8 as price, base_price::float8 as "basePrice",
+  cost::float8 as cost, stock, sales_30d as "sales30d",
+  status, favorite, tags,
+  created_at as "createdAt", updated_at as "updatedAt"
+`;
 
-export const skuRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook('preHandler', requireWorkspace);
+export default async function skuRoutes(app: FastifyInstance) {
+  app.addHook("preHandler", app.requireAuth);
 
-  app.get('/', async (req) => {
-    const q = req.query as Record<string, string>;
-    const where: any = { workspaceId: req.workspaceId! };
-    if (q.status) where.status = q.status;
-    if (q.favorite === 'true') where.favorite = true;
-    if (q.search) {
-      where.OR = [
-        { sku: { contains: q.search, mode: 'insensitive' } },
-        { asin: { contains: q.search, mode: 'insensitive' } },
-        { product: { name: { contains: q.search, mode: 'insensitive' } } },
-      ];
-    }
-    if (q.tag) where.tags = { some: { tagId: q.tag } };
+  app.get("/skus", async (req) => {
+    const q = listQuery.parse(req.query);
+    const wsId = req.user!.workspaceId;
+    const offset = (q.page - 1) * q.pageSize;
+    const search = q.search ? `%${q.search}%` : null;
 
-    const take = Math.min(Number(q.pageSize ?? 50), 200);
-    const skip = (Math.max(Number(q.page ?? 1), 1) - 1) * take;
-    const [total, items] = await Promise.all([
-      prisma.sKU.count({ where }),
-      prisma.sKU.findMany({
-        where,
-        include: {
-          product: true,
-          listings: { include: { connection: true } },
-          tags: { include: { tag: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take,
-      }),
-    ]);
-    return {
-      total,
-      items: items.map((s) => ({
-        ...s,
-        tags: s.tags.map((t) => t.tag),
-      })),
-    };
+    const where = sql`
+      where workspace_id = ${wsId}
+      ${search ? sql`and (sku ilike ${search} or title ilike ${search} or asin ilike ${search})` : sql``}
+      ${q.status ? sql`and status = ${q.status}` : sql``}
+      ${q.channel ? sql`and channel = ${q.channel}` : sql``}
+      ${q.favorite ? sql`and favorite = true` : sql``}
+    `;
+
+    const [{ count }] = await sql<{ count: number }[]>`
+      select count(*)::int as count from skus ${where}
+    `;
+    const items = await sql`
+      select ${selectCols} from skus ${where}
+      order by updated_at desc
+      limit ${q.pageSize} offset ${offset}
+    `;
+    return { items, total: count, page: q.page, pageSize: q.pageSize };
   });
 
-  app.get('/:id', async (req, reply) => {
+  app.get("/skus/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const sku = await prisma.sKU.findFirst({
-      where: { id, workspaceId: req.workspaceId! },
-      include: {
-        product: true,
-        listings: {
-          include: {
-            connection: true,
-            priceHistory: { orderBy: { changedAt: 'desc' }, take: 30 },
-          },
-        },
-        schedules: { orderBy: { startAt: 'desc' }, take: 20 },
-        tags: { include: { tag: true } },
-      },
+    const rows = await sql`
+      select ${selectCols} from skus
+      where id = ${id} and workspace_id = ${req.user!.workspaceId}
+    `;
+    if (!rows.length) return reply.code(404).send({ error: "Not found" });
+    return rows[0];
+  });
+
+  app.post("/skus", async (req, reply) => {
+    const body = skuCreateSchema.parse(req.body);
+    const wsId = req.user!.workspaceId;
+    const [row] = await sql`
+      insert into skus
+        (workspace_id, sku, asin, title, image_url, channel, price,
+         base_price, cost, stock, sales_30d, status, favorite, tags)
+      values (
+        ${wsId}, ${body.sku}, ${body.asin ?? null}, ${body.title},
+        ${body.imageUrl ?? null}, ${body.channel}, ${body.price},
+        ${body.basePrice ?? null}, ${body.cost ?? null},
+        ${body.stock ?? 0}, ${body.sales30d ?? 0}, ${body.status},
+        ${body.favorite ?? false}, ${jsonb(body.tags ?? [])}
+      )
+      returning ${selectCols}
+    `;
+    await recordActivity({
+      workspaceId: wsId,
+      actor: req.user!.email,
+      action: "created",
+      entityType: "sku",
+      entityId: row.id,
+      summary: `SKU ${body.sku} created`,
     });
-    if (!sku) return reply.code(404).send({ error: 'Not found' });
-    return { ...sku, tags: sku.tags.map((t) => t.tag) };
+    return reply.code(201).send(row);
   });
 
-  app.post('/', async (req, reply) => {
-    const body = createSchema.parse(req.body);
-    const product = await prisma.product.findFirst({ where: { id: body.productId, workspaceId: req.workspaceId! } });
-    if (!product) return reply.code(400).send({ error: 'Product not in workspace' });
-    try {
-      const sku = await prisma.sKU.create({
-        data: { ...body, workspaceId: req.workspaceId! },
-      });
-      await logActivity({
-        workspaceId: req.workspaceId!,
-        userId: req.userId,
-        type: 'sku.created',
-        description: `Created SKU ${sku.sku}`,
-      });
-      return sku;
-    } catch (e: any) {
-      if (e.code === 'P2002') return reply.code(409).send({ error: 'SKU already exists' });
-      throw e;
-    }
-  });
-
-  app.patch('/:id', async (req, reply) => {
+  app.patch("/skus/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const existing = await prisma.sKU.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!existing) return reply.code(404).send({ error: 'Not found' });
-    const body = createSchema.partial().parse(req.body);
-    return prisma.sKU.update({ where: { id }, data: body });
+    const body = skuUpdateSchema.parse(req.body);
+    const wsId = req.user!.workspaceId;
+
+    const patch: Record<string, unknown> = {};
+    if (body.sku !== undefined) patch.sku = body.sku;
+    if (body.asin !== undefined) patch.asin = body.asin;
+    if (body.title !== undefined) patch.title = body.title;
+    if (body.imageUrl !== undefined) patch.image_url = body.imageUrl;
+    if (body.channel !== undefined) patch.channel = body.channel;
+    if (body.price !== undefined) patch.price = body.price;
+    if (body.basePrice !== undefined) patch.base_price = body.basePrice;
+    if (body.cost !== undefined) patch.cost = body.cost;
+    if (body.stock !== undefined) patch.stock = body.stock;
+    if (body.sales30d !== undefined) patch.sales_30d = body.sales30d;
+    if (body.status !== undefined) patch.status = body.status;
+    if (body.favorite !== undefined) patch.favorite = body.favorite;
+    if (body.tags !== undefined) patch.tags = jsonb(body.tags);
+    patch.updated_at = sql`now()`;
+
+    const cols = Object.keys(patch);
+    if (cols.length === 1) return reply.code(400).send({ error: "No fields" });
+
+    const [row] = await sql`
+      update skus set ${sql(patch, ...cols)}
+      where id = ${id} and workspace_id = ${wsId}
+      returning ${selectCols}
+    `;
+    if (!row) return reply.code(404).send({ error: "Not found" });
+    await recordActivity({
+      workspaceId: wsId,
+      actor: req.user!.email,
+      action: "updated",
+      entityType: "sku",
+      entityId: id,
+      summary: `SKU ${row.sku} updated`,
+    });
+    return row;
   });
 
-  app.delete('/:id', async (req, reply) => {
+  app.delete("/skus/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const existing = await prisma.sKU.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!existing) return reply.code(404).send({ error: 'Not found' });
-    await prisma.sKU.delete({ where: { id } });
+    const rows = await sql`
+      delete from skus
+      where id = ${id} and workspace_id = ${req.user!.workspaceId}
+      returning sku
+    `;
+    if (!rows.length) return reply.code(404).send({ error: "Not found" });
+    await recordActivity({
+      workspaceId: req.user!.workspaceId,
+      actor: req.user!.email,
+      action: "deleted",
+      entityType: "sku",
+      entityId: id,
+      summary: `SKU ${rows[0].sku} deleted`,
+    });
     return { ok: true };
   });
-
-  app.post('/bulk-action', async (req) => {
-    const body = bulkSchema.parse(req.body);
-    const skus = await prisma.sKU.findMany({
-      where: { id: { in: body.skuIds }, workspaceId: req.workspaceId! },
-      select: { id: true },
-    });
-    const ids = skus.map((s) => s.id);
-    if (ids.length === 0) return { ok: true, affected: 0 };
-
-    switch (body.action) {
-      case 'delete':
-        await prisma.sKU.deleteMany({ where: { id: { in: ids } } });
-        break;
-      case 'activate':
-        await prisma.sKU.updateMany({ where: { id: { in: ids } }, data: { status: 'ACTIVE' } });
-        break;
-      case 'deactivate':
-        await prisma.sKU.updateMany({ where: { id: { in: ids } }, data: { status: 'INACTIVE' } });
-        break;
-      case 'favorite':
-        await prisma.sKU.updateMany({ where: { id: { in: ids } }, data: { favorite: true } });
-        break;
-      case 'unfavorite':
-        await prisma.sKU.updateMany({ where: { id: { in: ids } }, data: { favorite: false } });
-        break;
-      case 'tag':
-        if (!body.tagId) break;
-        await prisma.tagSKU.createMany({
-          data: ids.map((skuId) => ({ skuId, tagId: body.tagId! })),
-          skipDuplicates: true,
-        });
-        break;
-      case 'untag':
-        if (!body.tagId) break;
-        await prisma.tagSKU.deleteMany({ where: { skuId: { in: ids }, tagId: body.tagId } });
-        break;
-    }
-    return { ok: true, affected: ids.length };
-  });
-
-  app.get('/:id/history', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const sku = await prisma.sKU.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!sku) return reply.code(404).send({ error: 'Not found' });
-    const history = await prisma.priceHistory.findMany({
-      where: { listing: { skuId: id } },
-      orderBy: { changedAt: 'desc' },
-      include: { listing: { include: { connection: true } } },
-      take: 200,
-    });
-    return history;
-  });
-};
+}

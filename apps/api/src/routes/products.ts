@@ -1,81 +1,49 @@
-import type { FastifyPluginAsync } from 'fastify';
-import { z } from 'zod';
-import { prisma } from '../lib/prisma';
-import { requireWorkspace } from '../lib/auth';
-import { logActivity } from '../lib/activity';
+import type { FastifyInstance } from "fastify";
+import { productCreateSchema } from "@fbm/shared";
+import { sql, jsonb } from "../db.js";
+import { recordActivity } from "../lib/activity.js";
 
-const createSchema = z.object({
-  name: z.string().min(1),
-  basePrice: z.number().nonnegative(),
-  imageUrl: z.string().url().optional(),
-  description: z.string().optional(),
-});
+const cols = sql`id, name, description, sku_ids as "skuIds", created_at as "createdAt"`;
 
-export const productRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook('preHandler', requireWorkspace);
+export default async function productRoutes(app: FastifyInstance) {
+  app.addHook("preHandler", app.requireAuth);
 
-  app.get('/', async (req) => {
-    const { search, page = '1', pageSize = '50' } = req.query as Record<string, string>;
-    const where: any = { workspaceId: req.workspaceId! };
-    if (search) where.name = { contains: search, mode: 'insensitive' };
-    const take = Math.min(Number(pageSize) || 50, 200);
-    const skip = (Math.max(Number(page) || 1, 1) - 1) * take;
-    const [total, items] = await Promise.all([
-      prisma.product.count({ where }),
-      prisma.product.findMany({
-        where,
-        include: {
-          skus: {
-            include: {
-              listings: { include: { connection: true } },
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take,
-      }),
-    ]);
-    return { total, items };
+  app.get("/products", async (req) => {
+    const items = await sql`
+      select ${cols} from products
+      where workspace_id = ${req.user!.workspaceId}
+      order by created_at desc
+    `;
+    return { items, total: items.length };
   });
 
-  app.get('/:id', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const product = await prisma.product.findFirst({
-      where: { id, workspaceId: req.workspaceId! },
-      include: { skus: { include: { listings: { include: { connection: true } } } } },
+  app.post("/products", async (req, reply) => {
+    const body = productCreateSchema.parse(req.body);
+    const [row] = await sql`
+      insert into products (workspace_id, name, description, sku_ids)
+      values (${req.user!.workspaceId}, ${body.name},
+              ${body.description ?? null}, ${jsonb(body.skuIds)})
+      returning ${cols}
+    `;
+    await recordActivity({
+      workspaceId: req.user!.workspaceId,
+      actor: req.user!.email,
+      action: "created",
+      entityType: "product",
+      entityId: row.id,
+      summary: `Product "${body.name}" created`,
     });
-    if (!product) return reply.code(404).send({ error: 'Not found' });
-    return product;
+    return reply.code(201).send(row);
   });
 
-  app.post('/', async (req) => {
-    const body = createSchema.parse(req.body);
-    const product = await prisma.product.create({
-      data: { ...body, workspaceId: req.workspaceId! },
-    });
-    await logActivity({
-      workspaceId: req.workspaceId!,
-      userId: req.userId,
-      type: 'product.created',
-      description: `Created product ${product.name}`,
-    });
-    return product;
-  });
-
-  app.patch('/:id', async (req, reply) => {
+  app.delete("/products/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const existing = await prisma.product.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!existing) return reply.code(404).send({ error: 'Not found' });
-    const body = createSchema.partial().parse(req.body);
-    return prisma.product.update({ where: { id }, data: body });
-  });
-
-  app.delete('/:id', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const existing = await prisma.product.findFirst({ where: { id, workspaceId: req.workspaceId! } });
-    if (!existing) return reply.code(404).send({ error: 'Not found' });
-    await prisma.product.delete({ where: { id } });
+    const rows = await sql`
+      delete from products
+      where id = ${id} and workspace_id = ${req.user!.workspaceId}
+      returning name
+    `;
+    if (!rows.length) return reply.code(404).send({ error: "Not found" });
     return { ok: true };
   });
-};
+}

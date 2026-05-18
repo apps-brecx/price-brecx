@@ -1,78 +1,71 @@
-import { useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
-import toast from 'react-hot-toast';
-import { useAuth } from '@/lib/auth';
+import { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import "./Auth.css";
 
-export default function SignIn() {
-  const { signIn, user, loading } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+export function SignIn() {
+  const nav = useNavigate();
+  const { refresh } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  if (loading) return null;
-  if (user) return <Navigate to="/dashboard" replace />;
-
-  async function onSubmit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setSubmitting(true);
+    setBusy(true);
+    setError(null);
     try {
-      await signIn(email, password);
-    } catch (err: any) {
-      toast.error(err.message || 'Sign in failed');
+      await api.post("/auth/sign-in", { email, password });
+      await refresh();
+      nav("/");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign in failed");
     } finally {
-      setSubmitting(false);
+      setBusy(false);
     }
   }
 
   return (
-    <div className="grid min-h-screen place-items-center px-4" style={{ background: 'var(--bg)' }}>
-      <div className="card w-full max-w-md card-pad">
-        <div className="mb-6 flex items-center gap-2.5">
-          <svg width="28" height="28" viewBox="0 0 32 32">
-            <defs>
-              <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#3b82f6" />
-                <stop offset="100%" stopColor="#1f47e5" />
-              </linearGradient>
-            </defs>
-            <circle cx="16" cy="16" r="15" fill="url(#g1)" />
-            <circle cx="16" cy="16" r="10" fill="none" stroke="#fff" strokeWidth="2" />
-            <circle cx="16" cy="16" r="4" fill="#fff" />
-          </svg>
-          <div className="text-[18px] font-semibold tracking-tight">Priceobo</div>
+    <div className="auth-shell">
+      <form className="auth-card" onSubmit={submit}>
+        <div className="auth-brand">
+          <span className="logo-dot" />
+          Priceobo
         </div>
+        <h1>Welcome back</h1>
+        <p className="muted">Sign in to your workspace</p>
 
-        <h1 className="text-[20px] font-semibold">Sign in</h1>
-        <p className="mt-1 text-[13px] text-ink-3">Welcome back — sign in to your workspace.</p>
+        {error && <div className="auth-error">{error}</div>}
 
-        <form onSubmit={onSubmit} className="mt-5 space-y-3">
-          <div>
-            <label className="label">Email</label>
-            <input className="input" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Password</label>
-            <input
-              className="input"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-          <button type="submit" className="btn btn-primary w-full" disabled={submitting}>
-            {submitting ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
-
-        <div className="mt-4 text-center text-[12.5px] text-ink-3">
-          New here?{' '}
-          <Link to="/sign-up" className="font-semibold text-brand-700">
-            Create an account
-          </Link>
+        <div className="field">
+          <label>Email</label>
+          <input
+            className="input"
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
         </div>
-      </div>
+        <div className="field">
+          <label>Password</label>
+          <input
+            className="input"
+            type="password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+        <button className="btn btn-primary btn-block" disabled={busy}>
+          {busy ? "Signing in…" : "Sign in"}
+        </button>
+        <p className="auth-foot muted">
+          No account? <Link to="/sign-up">Create one</Link>
+        </p>
+      </form>
     </div>
   );
 }
