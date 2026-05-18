@@ -48,8 +48,13 @@ export type AutomationType = (typeof AUTOMATION_TYPES)[number];
 export const ALERT_KINDS = ["price", "sales", "stock", "buybox"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
-export const USER_ROLES = ["owner", "admin", "manager", "viewer"] as const;
+export const USER_ROLES = ["admin", "user"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
+
+export const USER_ROLE_LABELS: Record<UserRole, string> = {
+  admin: "Admin",
+  user: "User",
+};
 
 export const ACTIVITY_ACTIONS = [
   "created",

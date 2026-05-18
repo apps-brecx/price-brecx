@@ -32,6 +32,9 @@ services:
       # Comma-separated allowed web origins (set to the static site URL)
       - key: CORS_ORIGIN
         sync: false
+      # Public URL of the web app — used for invite links in emails
+      - key: APP_URL
+        sync: false
       - key: SENTRY_DSN
         sync: false
       # Optional: SMTP_*, R2_*, SPAPI_* — see apps/api/.env.example

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Logo } from "../components/Logo";
@@ -64,7 +64,7 @@ export function SignIn() {
           {busy ? "Signing in…" : "Sign in"}
         </button>
         <p className="auth-foot muted">
-          No account? <Link to="/sign-up">Create one</Link>
+          Access is invite-only. Ask an admin to invite you.
         </p>
       </form>
     </div>

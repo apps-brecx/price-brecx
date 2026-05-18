@@ -1,7 +1,8 @@
 /**
- * Bootstrap seed: creates one workspace + owner user from env vars.
- * Intentionally seeds NO product/SKU data — real data comes from the app
- * (imports, marketplace sync). Run:
+ * Bootstrap seed: creates one workspace + the first ADMIN user from env vars.
+ * Account creation is otherwise invite-only — this is how the very first
+ * admin exists so they can invite everyone else. Seeds NO product/SKU data.
+ * Run:
  *   SEED_EMAIL=you@example.com SEED_PASSWORD=changeme pnpm db:seed
  */
 import { sql } from "../db.js";
@@ -9,7 +10,7 @@ import { hashPassword } from "../auth/sessions.js";
 
 const email = process.env.SEED_EMAIL;
 const password = process.env.SEED_PASSWORD;
-const name = process.env.SEED_NAME ?? "Owner";
+const name = process.env.SEED_NAME ?? "Admin";
 const workspaceName = process.env.SEED_WORKSPACE ?? "My Workspace";
 
 async function run() {
@@ -29,9 +30,9 @@ async function run() {
   const hash = await hashPassword(password);
   await sql`
     insert into users (workspace_id, email, name, password_hash, role)
-    values (${ws.id}, ${email}, ${name}, ${hash}, 'owner')
+    values (${ws.id}, ${email}, ${name}, ${hash}, 'admin')
   `;
-  console.log(`Seeded workspace "${workspaceName}" + owner ${email}`);
+  console.log(`Seeded workspace "${workspaceName}" + admin ${email}`);
   await sql.end();
 }
 

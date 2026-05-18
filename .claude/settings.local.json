@@ -9,7 +9,8 @@
       "Bash(npx tsc *)",
       "Bash(echo \"EXIT:$?\")",
       "Bash(npx vite *)",
-      "Bash(git log *)"
+      "Bash(git log *)",
+      "PowerShell(pnpm *)"
     ]
   }
 }

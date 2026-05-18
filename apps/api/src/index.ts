@@ -16,6 +16,7 @@ import authPlugin from "./auth/plugin.js";
 
 import authRoutes from "./routes/auth.js";
 import meRoutes from "./routes/me.js";
+import userRoutes from "./routes/users.js";
 import skuRoutes from "./routes/skus.js";
 import productRoutes from "./routes/products.js";
 import scheduleRoutes from "./routes/schedules.js";
@@ -66,6 +67,7 @@ app.get("/", async () => ({ service: "fbm-api", status: "running" }));
 const api: FastifyPluginAsync = async (instance: FastifyInstance) => {
   await instance.register(authRoutes);
   await instance.register(meRoutes);
+  await instance.register(userRoutes);
   await instance.register(skuRoutes);
   await instance.register(productRoutes);
   await instance.register(scheduleRoutes);

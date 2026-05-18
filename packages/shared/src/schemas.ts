@@ -20,14 +20,6 @@ export const signInSchema = z.object({
 });
 export type SignInInput = z.infer<typeof signInSchema>;
 
-export const signUpSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8).max(200),
-  name: z.string().min(1).max(120),
-  workspaceName: z.string().min(1).max(120),
-});
-export type SignUpInput = z.infer<typeof signUpSchema>;
-
 export const userSchema = z.object({
   id: idSchema,
   email: z.string().email(),
@@ -37,6 +29,45 @@ export const userSchema = z.object({
   createdAt: z.string(),
 });
 export type User = z.infer<typeof userSchema>;
+
+/* Account creation is invite-only. An admin invites by email; the invitee
+ * sets their own name + password via the link from the invite email. */
+
+export const inviteCreateSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1).max(120),
+  role: z.enum(USER_ROLES).default("user"),
+});
+export type InviteCreateInput = z.infer<typeof inviteCreateSchema>;
+
+export const acceptInviteSchema = z.object({
+  token: z.string().min(16).max(200),
+  name: z.string().min(1).max(120),
+  password: z.string().min(8).max(200),
+});
+export type AcceptInviteInput = z.infer<typeof acceptInviteSchema>;
+
+/** Self-service or admin edit of a user. Role changes are admin-only and
+ * enforced server-side; password is optional (only when changing it). */
+export const userUpdateSchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    role: z.enum(USER_ROLES).optional(),
+    password: z.string().min(8).max(200).optional(),
+  })
+  .refine((b) => Object.keys(b).length > 0, { message: "No fields to update" });
+export type UserUpdateInput = z.infer<typeof userUpdateSchema>;
+
+export const invitationSchema = z.object({
+  id: idSchema,
+  email: z.string().email(),
+  name: z.string(),
+  role: z.enum(USER_ROLES),
+  invitedBy: z.string(),
+  expiresAt: z.string(),
+  createdAt: z.string(),
+});
+export type Invitation = z.infer<typeof invitationSchema>;
 
 /* ----------------------------- SKU ------------------------------ */
 

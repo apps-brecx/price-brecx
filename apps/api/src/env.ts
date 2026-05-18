@@ -19,6 +19,10 @@ const envSchema = z.object({
 
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
 
+  // Public URL of the web app — used to build invite links in emails.
+  // Falls back to the first CORS_ORIGIN entry when unset.
+  APP_URL: z.string().optional(),
+
   // Optional integrations — features degrade gracefully when unset.
   SENTRY_DSN: z.string().optional(),
 
@@ -53,3 +57,8 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export const isProd = env.NODE_ENV === "production";
+
+/** Base URL of the web app, used for links inside outbound emails. */
+export const appUrl = (
+  env.APP_URL ?? env.CORS_ORIGIN.split(",")[0] ?? "http://localhost:5173"
+).replace(/\/+$/, "");

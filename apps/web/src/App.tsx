@@ -2,7 +2,7 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./lib/auth";
 import { AppLayout } from "./components/AppLayout";
 import { SignIn } from "./pages/SignIn";
-import { SignUp } from "./pages/SignUp";
+import { AcceptInvite } from "./pages/AcceptInvite";
 import { Dashboard } from "./pages/Dashboard";
 import { Calendar } from "./pages/Calendar";
 import { Products } from "./pages/Products";
@@ -38,7 +38,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/sign-in" element={<SignIn />} />
-      <Route path="/sign-up" element={<SignUp />} />
+      <Route path="/accept-invite" element={<AcceptInvite />} />
       <Route
         element={
           <Protected>

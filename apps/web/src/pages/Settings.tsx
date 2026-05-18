@@ -5,15 +5,18 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { SalesChannel, AlertKind } from "@fbm/shared";
+import type { SalesChannel, AlertKind, UserRole } from "@fbm/shared";
 import {
   SALES_CHANNELS,
   CHANNEL_LABELS,
   ALERT_KINDS,
+  USER_ROLES,
+  USER_ROLE_LABELS,
   DEFAULT_TIMEZONE,
   DEFAULT_CURRENCY,
 } from "@fbm/shared";
 import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { date } from "../lib/format";
 import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
@@ -37,6 +40,31 @@ interface TeamMember {
 interface SettingsResponse {
   settings: WorkspaceSettings;
   team: TeamMember[];
+}
+
+interface UserRow {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  workspaceId: string;
+  createdAt: string;
+}
+
+interface InvitationRow {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  invitedBy: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+interface UsersResponse {
+  users: UserRow[];
+  invitations: InvitationRow[];
+  isAdmin: boolean;
 }
 
 interface Marketplace {
@@ -237,6 +265,83 @@ export function Settings() {
     },
   });
 
+  /* ---------------------- Users & invitations ---------------------- */
+  const { user: me, refresh: refreshAuth } = useAuth();
+
+  const usersQuery = useQuery({
+    queryKey: ["users"],
+    queryFn: () => api.get<UsersResponse>("/users"),
+    enabled: tab === "users",
+  });
+  const usersData = usersQuery.data;
+  const users = usersData?.users ?? [];
+  const invitations = usersData?.invitations ?? [];
+  const isAdmin = usersData?.isAdmin ?? me?.role === "admin";
+
+  const [profile, setProfile] = useState({ name: "", password: "" });
+  const [profileSaved, setProfileSaved] = useState(false);
+  useEffect(() => {
+    const self = users.find((u) => u.id === me?.id);
+    if (self) setProfile((p) => ({ ...p, name: self.name }));
+  }, [users, me?.id]);
+
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteDraft, setInviteDraft] = useState<{
+    email: string;
+    name: string;
+    role: UserRole;
+  }>({ email: "", name: "", role: "user" });
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [deleteUser, setDeleteUser] = useState<UserRow | null>(null);
+
+  const profileMut = useMutation({
+    mutationFn: (body: { name?: string; password?: string }) =>
+      api.patch(`/users/${me?.id}`, body),
+    onSuccess: async () => {
+      setProfile((p) => ({ ...p, password: "" }));
+      setProfileSaved(true);
+      setTimeout(() => setProfileSaved(false), 2500);
+      await qc.invalidateQueries({ queryKey: ["users"] });
+      await refreshAuth();
+    },
+  });
+
+  const roleMut = useMutation({
+    mutationFn: ({ id, role }: { id: string; role: UserRole }) =>
+      api.patch(`/users/${id}`, { role }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+
+  const inviteMut = useMutation({
+    mutationFn: (body: { email: string; name: string; role: UserRole }) =>
+      api.post<{ acceptUrl: string }>("/users/invite", body),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      setInviteOpen(false);
+      setInviteDraft({ email: "", name: "", role: "user" });
+      setInviteLink(res.acceptUrl);
+    },
+  });
+
+  const deleteUserMut = useMutation({
+    mutationFn: (id: string) => api.del(`/users/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      setDeleteUser(null);
+    },
+  });
+
+  const revokeInviteMut = useMutation({
+    mutationFn: (id: string) => api.del(`/users/invitations/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+
+  const resendInviteMut = useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ acceptUrl: string }>(`/users/invitations/${id}/resend`),
+    onSuccess: (res) => setInviteLink(res.acceptUrl),
+  });
+
   const team = settingsQuery.data?.team ?? [];
   const marketplaces = marketplacesQuery.data;
   const rules = rulesQuery.data?.items ?? [];
@@ -411,85 +516,424 @@ export function Settings() {
               )}
 
               {tab === "users" && (
-                <div className="card">
-                  <div className="card-header">
-                    <div>
-                      <div className="card-title">Team Members</div>
-                      <div className="card-subtitle">
-                        {team.length}{" "}
-                        {team.length === 1 ? "user" : "users"}
-                      </div>
-                    </div>
-                    <div style={{ flex: 1 }} />
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      disabled
-                      title="Invite is not available in this build"
-                    >
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                      >
-                        <line x1="12" y1="5" x2="12" y2="19" />
-                        <line x1="5" y1="12" x2="19" y2="12" />
-                      </svg>
-                      Invite member
-                    </button>
-                  </div>
-                  {team.length === 0 ? (
-                    <div style={{ padding: "48px 18px" }}>
-                      <EmptyState
-                        title="No team members"
-                        message="No users found for this workspace."
-                      />
-                    </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 16,
+                  }}
+                >
+                  {usersQuery.isLoading ? (
+                    <Loading />
+                  ) : usersQuery.isError ? (
+                    <ErrorState />
                   ) : (
-                    <table className="tbl tbl-compact">
-                      <thead>
-                        <tr>
-                          <th>User</th>
-                          <th>Email</th>
-                          <th>Role</th>
-                          <th>Joined</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {team.map((m) => (
-                          <tr key={m.id}>
-                            <td style={{ fontWeight: 600 }}>
-                              {m.name}
-                            </td>
-                            <td
-                              style={{ color: "var(--text-3)" }}
-                            >
-                              {m.email}
-                            </td>
-                            <td>
-                              <span
-                                className={
-                                  "badge " +
-                                  (m.role === "admin" ||
-                                  m.role === "owner"
-                                    ? "badge-info"
-                                    : "badge-neutral")
+                    <>
+                      {inviteLink && (
+                        <div
+                          className="card"
+                          style={{
+                            padding: "12px 14px",
+                            background: "var(--info-bg)",
+                            border: "1px solid var(--info-fg)",
+                            fontSize: "12.5px",
+                          }}
+                        >
+                          <strong>Invite link</strong> — share this if the
+                          email doesn't arrive:
+                          <div
+                            style={{
+                              wordBreak: "break-all",
+                              marginTop: 4,
+                            }}
+                          >
+                            <a href={inviteLink}>{inviteLink}</a>
+                          </div>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            style={{ marginTop: 6 }}
+                            onClick={() => setInviteLink(null)}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Your profile — available to every member */}
+                      <div className="card">
+                        <div className="card-header">
+                          <div>
+                            <div className="card-title">Your profile</div>
+                            <div className="card-subtitle">
+                              Update your name or password
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ padding: 18 }}>
+                          <div className="form-row">
+                            <div className="form-group">
+                              <label className="form-label">Name</label>
+                              <input
+                                className="form-control"
+                                value={profile.name}
+                                onChange={(e) =>
+                                  setProfile({
+                                    ...profile,
+                                    name: e.target.value,
+                                  })
                                 }
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label className="form-label">Email</label>
+                              <input
+                                className="form-control"
+                                value={me?.email ?? ""}
+                                disabled
+                                readOnly
+                              />
+                            </div>
+                          </div>
+                          <div className="form-group">
+                            <label className="form-label">
+                              New password
+                            </label>
+                            <input
+                              className="form-control"
+                              type="password"
+                              placeholder="Leave blank to keep current"
+                              value={profile.password}
+                              onChange={(e) =>
+                                setProfile({
+                                  ...profile,
+                                  password: e.target.value,
+                                })
+                              }
+                            />
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 10,
+                              alignItems: "center",
+                              justifyContent: "flex-end",
+                              marginTop: 14,
+                            }}
+                          >
+                            {profileSaved && (
+                              <span
+                                style={{
+                                  fontSize: "12.5px",
+                                  color: "var(--success-fg)",
+                                }}
                               >
-                                {m.role}
+                                Saved
                               </span>
-                            </td>
-                            <td
-                              style={{ color: "var(--text-3)" }}
+                            )}
+                            {profileMut.isError && (
+                              <span
+                                style={{
+                                  fontSize: "12.5px",
+                                  color: "var(--danger-fg)",
+                                }}
+                              >
+                                Failed to save
+                              </span>
+                            )}
+                            <button
+                              className="btn btn-primary btn-sm"
+                              disabled={
+                                profileMut.isPending ||
+                                !profile.name ||
+                                (profile.password.length > 0 &&
+                                  profile.password.length < 8)
+                              }
+                              onClick={() =>
+                                profileMut.mutate({
+                                  name: profile.name,
+                                  ...(profile.password
+                                    ? { password: profile.password }
+                                    : {}),
+                                })
+                              }
                             >
-                              {date(m.createdAt)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                              {profileMut.isPending
+                                ? "Saving…"
+                                : "Save profile"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Team management — admins only */}
+                      {isAdmin && (
+                        <div className="card">
+                          <div className="card-header">
+                            <div>
+                              <div className="card-title">
+                                Team Members
+                              </div>
+                              <div className="card-subtitle">
+                                {users.length}{" "}
+                                {users.length === 1 ? "user" : "users"}
+                              </div>
+                            </div>
+                            <div style={{ flex: 1 }} />
+                            <button
+                              className="btn btn-primary btn-sm"
+                              onClick={() => {
+                                setInviteDraft({
+                                  email: "",
+                                  name: "",
+                                  role: "user",
+                                });
+                                setInviteOpen(true);
+                              }}
+                            >
+                              <svg
+                                width="13"
+                                height="13"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                              >
+                                <line x1="12" y1="5" x2="12" y2="19" />
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                              </svg>
+                              Invite member
+                            </button>
+                          </div>
+                          <table className="tbl tbl-compact">
+                            <thead>
+                              <tr>
+                                <th>User</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Joined</th>
+                                <th />
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {users.map((u) => {
+                                const isSelf = u.id === me?.id;
+                                return (
+                                  <tr key={u.id}>
+                                    <td style={{ fontWeight: 600 }}>
+                                      {u.name}
+                                      {isSelf && (
+                                        <span
+                                          className="badge badge-neutral"
+                                          style={{ marginLeft: 6 }}
+                                        >
+                                          You
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td
+                                      style={{
+                                        color: "var(--text-3)",
+                                      }}
+                                    >
+                                      {u.email}
+                                    </td>
+                                    <td>
+                                      <select
+                                        className="form-control"
+                                        style={{
+                                          height: 28,
+                                          padding: "0 8px",
+                                          fontSize: "12px",
+                                          width: "auto",
+                                        }}
+                                        value={u.role}
+                                        disabled={
+                                          roleMut.isPending
+                                        }
+                                        onChange={(e) =>
+                                          roleMut.mutate({
+                                            id: u.id,
+                                            role: e.target
+                                              .value as UserRole,
+                                          })
+                                        }
+                                      >
+                                        {USER_ROLES.map((r) => (
+                                          <option key={r} value={r}>
+                                            {USER_ROLE_LABELS[r]}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </td>
+                                    <td
+                                      style={{
+                                        color: "var(--text-3)",
+                                      }}
+                                    >
+                                      {date(u.createdAt)}
+                                    </td>
+                                    <td>
+                                      {!isSelf && (
+                                        <button
+                                          className="btn btn-ghost btn-sm"
+                                          style={{
+                                            color:
+                                              "var(--danger-fg)",
+                                          }}
+                                          title="Delete user"
+                                          onClick={() =>
+                                            setDeleteUser(u)
+                                          }
+                                        >
+                                          <svg
+                                            width="13"
+                                            height="13"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                          >
+                                            <polyline points="3 6 5 6 21 6" />
+                                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                          </svg>
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                          {roleMut.isError && (
+                            <div
+                              style={{
+                                padding: "10px 14px",
+                                fontSize: "12.5px",
+                                color: "var(--danger-fg)",
+                              }}
+                            >
+                              Could not change role —{" "}
+                              {roleMut.error instanceof Error
+                                ? roleMut.error.message
+                                : "please retry"}
+                              .
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Pending invitations — admins only */}
+                      {isAdmin && (
+                        <div className="card">
+                          <div className="card-header">
+                            <div>
+                              <div className="card-title">
+                                Pending invitations
+                              </div>
+                              <div className="card-subtitle">
+                                {invitations.length} awaiting
+                                acceptance
+                              </div>
+                            </div>
+                          </div>
+                          {invitations.length === 0 ? (
+                            <div style={{ padding: "36px 18px" }}>
+                              <EmptyState
+                                title="No pending invitations"
+                                message="Invite a member to add them to this workspace."
+                              />
+                            </div>
+                          ) : (
+                            <table className="tbl tbl-compact">
+                              <thead>
+                                <tr>
+                                  <th>Name</th>
+                                  <th>Email</th>
+                                  <th>Role</th>
+                                  <th>Invited by</th>
+                                  <th>Expires</th>
+                                  <th />
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {invitations.map((inv) => (
+                                  <tr key={inv.id}>
+                                    <td style={{ fontWeight: 600 }}>
+                                      {inv.name}
+                                    </td>
+                                    <td
+                                      style={{
+                                        color: "var(--text-3)",
+                                      }}
+                                    >
+                                      {inv.email}
+                                    </td>
+                                    <td>
+                                      <span className="badge badge-neutral">
+                                        {USER_ROLE_LABELS[inv.role]}
+                                      </span>
+                                    </td>
+                                    <td
+                                      style={{
+                                        color: "var(--text-3)",
+                                        fontSize: "12px",
+                                      }}
+                                    >
+                                      {inv.invitedBy}
+                                    </td>
+                                    <td
+                                      style={{
+                                        color: "var(--text-3)",
+                                        fontSize: "12px",
+                                      }}
+                                    >
+                                      {date(inv.expiresAt)}
+                                    </td>
+                                    <td
+                                      style={{
+                                        display: "flex",
+                                        gap: 4,
+                                      }}
+                                    >
+                                      <button
+                                        className="btn btn-ghost btn-sm"
+                                        disabled={
+                                          resendInviteMut.isPending
+                                        }
+                                        onClick={() =>
+                                          resendInviteMut.mutate(
+                                            inv.id,
+                                          )
+                                        }
+                                      >
+                                        Resend
+                                      </button>
+                                      <button
+                                        className="btn btn-ghost btn-sm"
+                                        style={{
+                                          color:
+                                            "var(--danger-fg)",
+                                        }}
+                                        disabled={
+                                          revokeInviteMut.isPending
+                                        }
+                                        onClick={() =>
+                                          revokeInviteMut.mutate(
+                                            inv.id,
+                                          )
+                                        }
+                                      >
+                                        Revoke
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -1048,6 +1492,141 @@ export function Settings() {
           <strong>{deleteRule?.name}</strong>? This action cannot
           be undone.
         </div>
+      </Modal>
+
+      {/* Invite member modal */}
+      <Modal
+        open={inviteOpen}
+        title="Invite member"
+        subtitle="They'll get an email to set their password"
+        onClose={() => setInviteOpen(false)}
+        footer={
+          <>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setInviteOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={
+                inviteMut.isPending ||
+                !inviteDraft.email ||
+                !inviteDraft.name
+              }
+              onClick={() => inviteMut.mutate(inviteDraft)}
+            >
+              {inviteMut.isPending ? "Sending…" : "Send invite"}
+            </button>
+          </>
+        }
+      >
+        <div className="form-group">
+          <label className="form-label">
+            Name <span className="req">*</span>
+          </label>
+          <input
+            className="form-control"
+            placeholder="Jane Doe"
+            value={inviteDraft.name}
+            onChange={(e) =>
+              setInviteDraft({ ...inviteDraft, name: e.target.value })
+            }
+          />
+        </div>
+        <div className="form-group">
+          <label className="form-label">
+            Email <span className="req">*</span>
+          </label>
+          <input
+            className="form-control"
+            type="email"
+            placeholder="teammate@brecx.com"
+            value={inviteDraft.email}
+            onChange={(e) =>
+              setInviteDraft({ ...inviteDraft, email: e.target.value })
+            }
+          />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Role</label>
+          <select
+            className="form-control"
+            value={inviteDraft.role}
+            onChange={(e) =>
+              setInviteDraft({
+                ...inviteDraft,
+                role: e.target.value as UserRole,
+              })
+            }
+          >
+            {USER_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {USER_ROLE_LABELS[r]}
+              </option>
+            ))}
+          </select>
+          <div className="form-help">
+            Admins can manage members; Users can only edit their own
+            profile.
+          </div>
+        </div>
+        {inviteMut.isError && (
+          <div
+            style={{ fontSize: "12.5px", color: "var(--danger-fg)" }}
+          >
+            {inviteMut.error instanceof Error
+              ? inviteMut.error.message
+              : "Failed to send invite. Please retry."}
+          </div>
+        )}
+      </Modal>
+
+      {/* Delete user confirm modal */}
+      <Modal
+        open={deleteUser !== null}
+        title="Delete user"
+        onClose={() => setDeleteUser(null)}
+        footer={
+          <>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setDeleteUser(null)}
+            >
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ background: "var(--danger-fg)" }}
+              disabled={deleteUserMut.isPending}
+              onClick={() =>
+                deleteUser && deleteUserMut.mutate(deleteUser.id)
+              }
+            >
+              {deleteUserMut.isPending ? "Deleting…" : "Confirm delete"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ fontSize: "13px", color: "var(--text-2)" }}>
+          Delete <strong>{deleteUser?.name}</strong> ({deleteUser?.email})?
+          They will be signed out and lose access immediately. This action
+          cannot be undone.
+        </div>
+        {deleteUserMut.isError && (
+          <div
+            style={{
+              marginTop: 10,
+              fontSize: "12.5px",
+              color: "var(--danger-fg)",
+            }}
+          >
+            {deleteUserMut.error instanceof Error
+              ? deleteUserMut.error.message
+              : "Failed to delete user."}
+          </div>
+        )}
       </Modal>
     </div>
   );
