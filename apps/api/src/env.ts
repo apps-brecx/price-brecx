@@ -13,6 +13,9 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  // Use "none" when the web app and API are on different sites (e.g. two
+  // *.onrender.com subdomains). "none" requires Secure (https).
+  COOKIE_SAMESITE: z.enum(["lax", "none", "strict"]).default("lax"),
 
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
 

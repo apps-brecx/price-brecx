@@ -84,6 +84,11 @@ Status · History · Settings (general / team / marketplaces).
 - Cookie-based sessions (`fbm_session`, httpOnly), passwords bcrypt-hashed.
 - Every authenticated request is scoped to the user's workspace.
 - Sign-up creates a workspace + owner user.
+- When the web app and API are on **different sites** (e.g. two
+  `*.onrender.com` subdomains, since `onrender.com` is a public suffix), set
+  `COOKIE_SAMESITE=none` and `COOKIE_SECURE=true` on the API so the session
+  cookie is sent on cross-site requests. Same-origin / same registrable domain
+  can keep the `lax` default.
 
 ## Project layout
 
