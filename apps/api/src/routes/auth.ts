@@ -13,8 +13,9 @@ import { recordActivity } from "../lib/activity.js";
 const cookieOpts = {
   path: "/",
   httpOnly: true,
-  sameSite: "lax" as const,
-  secure: env.COOKIE_SECURE,
+  sameSite: env.COOKIE_SAMESITE,
+  // SameSite=None is only honoured by browsers when the cookie is Secure.
+  secure: env.COOKIE_SECURE || env.COOKIE_SAMESITE === "none",
   maxAge: 30 * 86400,
 };
 

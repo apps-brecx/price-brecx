@@ -17,6 +17,9 @@ services:
         value: 4000
       - key: COOKIE_SECURE
         value: "true"
+      # web and API are separate onrender.com subdomains (cross-site)
+      - key: COOKIE_SAMESITE
+        value: "none"
       # Neon pooled connection string — include ?sslmode=require
       - key: DATABASE_URL
         sync: false
