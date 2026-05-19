@@ -14,6 +14,9 @@ export function inviteEmailHtml(opts: {
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">
+      ${escapeHtml(inviterName)} invited you to the ${escapeHtml(workspaceName)} workspace on Priceobo.
+    </div>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 0;">
       <tr>
         <td align="center">
@@ -63,6 +66,33 @@ export function inviteEmailHtml(opts: {
     </table>
   </body>
 </html>`;
+}
+
+/**
+ * Plain-text counterpart of {@link inviteEmailHtml}. Sent alongside the HTML
+ * as the multipart fallback — clients that block HTML still get a usable link,
+ * and a text part lifts deliverability past most spam filters.
+ */
+export function inviteEmailText(opts: {
+  workspaceName: string;
+  inviterName: string;
+  acceptUrl: string;
+  expiresInDays: number;
+}): string {
+  const { workspaceName, inviterName, acceptUrl, expiresInDays } = opts;
+  return [
+    "You've been invited to Priceobo",
+    "",
+    `${inviterName} has invited you to join the ${workspaceName} workspace on Priceobo.`,
+    "",
+    "Accept your invitation and set your password here:",
+    acceptUrl,
+    "",
+    `This invitation expires in ${expiresInDays} days.`,
+    "If you weren't expecting this invitation you can safely ignore this email.",
+    "",
+    "— Priceobo",
+  ].join("\n");
 }
 
 function escapeHtml(s: string): string {

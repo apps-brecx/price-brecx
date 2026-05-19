@@ -11,6 +11,7 @@ import { initSentry, captureError } from "./sentry.js";
 import { pingDatabase } from "./db.js";
 import { startJobs, stopJobs } from "./jobs.js";
 import { addSocket } from "./ws.js";
+import { verifyMailer } from "./mailer.js";
 import { resolveSession } from "./auth/sessions.js";
 import authPlugin from "./auth/plugin.js";
 
@@ -108,6 +109,8 @@ async function main() {
   }
   await app.listen({ port: env.PORT, host: env.HOST });
   logger.info(`API listening on ${env.HOST}:${env.PORT} (${env.NODE_ENV})`);
+  // Non-blocking: surfaces an SMTP-ready / not-configured log line on boot.
+  void verifyMailer();
 }
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {

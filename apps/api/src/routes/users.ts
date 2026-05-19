@@ -7,7 +7,7 @@ import {
   inviteExpiry,
   INVITE_TTL_DAYS,
 } from "../lib/invites.js";
-import { inviteEmailHtml } from "../lib/emailTemplates.js";
+import { inviteEmailHtml, inviteEmailText } from "../lib/emailTemplates.js";
 import { sendMail } from "../mailer.js";
 import { recordActivity } from "../lib/activity.js";
 import { appUrl } from "../env.js";
@@ -107,15 +107,17 @@ export default async function userRoutes(app: FastifyInstance) {
         select name from workspaces where id = ${wsId}
       `;
       const acceptUrl = `${appUrl}/accept-invite?token=${token}`;
+      const mailOpts = {
+        workspaceName: ws?.name ?? "Priceobo",
+        inviterName: req.user!.name,
+        acceptUrl,
+        expiresInDays: INVITE_TTL_DAYS,
+      };
       await sendMail({
         to: email,
         subject: `You've been invited to ${ws?.name ?? "Priceobo"}`,
-        html: inviteEmailHtml({
-          workspaceName: ws?.name ?? "Priceobo",
-          inviterName: req.user!.name,
-          acceptUrl,
-          expiresInDays: INVITE_TTL_DAYS,
-        }),
+        html: inviteEmailHtml(mailOpts),
+        text: inviteEmailText(mailOpts),
       });
       await recordActivity({
         workspaceId: wsId,
@@ -285,15 +287,17 @@ export default async function userRoutes(app: FastifyInstance) {
         select name from workspaces where id = ${wsId}
       `;
       const acceptUrl = `${appUrl}/accept-invite?token=${token}`;
+      const mailOpts = {
+        workspaceName: ws?.name ?? "Priceobo",
+        inviterName: req.user!.name,
+        acceptUrl,
+        expiresInDays: INVITE_TTL_DAYS,
+      };
       await sendMail({
         to: invite.email,
         subject: `You've been invited to ${ws?.name ?? "Priceobo"}`,
-        html: inviteEmailHtml({
-          workspaceName: ws?.name ?? "Priceobo",
-          inviterName: req.user!.name,
-          acceptUrl,
-          expiresInDays: INVITE_TTL_DAYS,
-        }),
+        html: inviteEmailHtml(mailOpts),
+        text: inviteEmailText(mailOpts),
       });
       return { ok: true, acceptUrl };
     },

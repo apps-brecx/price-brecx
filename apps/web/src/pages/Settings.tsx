@@ -17,6 +17,7 @@ import {
 } from "@fbm/shared";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useToast } from "../components/Toast";
 import { date } from "../lib/format";
 import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
@@ -176,6 +177,7 @@ function NotAvailable({ feature }: { feature: string }) {
 
 export function Settings() {
   const qc = useQueryClient();
+  const toast = useToast();
   const [tab, setTab] = useState<Tab>("general");
 
   const [form, setForm] = useState<SettingsForm>({
@@ -315,11 +317,18 @@ export function Settings() {
   const inviteMut = useMutation({
     mutationFn: (body: { email: string; name: string; role: UserRole }) =>
       api.post<{ acceptUrl: string }>("/users/invite", body),
-    onSuccess: (res) => {
+    onSuccess: (res, vars) => {
       qc.invalidateQueries({ queryKey: ["users"] });
       setInviteOpen(false);
       setInviteDraft({ email: "", name: "", role: "user" });
       setInviteLink(res.acceptUrl);
+      toast.success("Invitation sent", `Invite email sent to ${vars.email}`);
+    },
+    onError: (err) => {
+      toast.error(
+        "Couldn't send invite",
+        err instanceof Error ? err.message : "Please try again.",
+      );
     },
   });
 
@@ -339,7 +348,16 @@ export function Settings() {
   const resendInviteMut = useMutation({
     mutationFn: (id: string) =>
       api.post<{ acceptUrl: string }>(`/users/invitations/${id}/resend`),
-    onSuccess: (res) => setInviteLink(res.acceptUrl),
+    onSuccess: (res) => {
+      setInviteLink(res.acceptUrl);
+      toast.success("Invitation resent", "A fresh invite email is on its way.");
+    },
+    onError: (err) => {
+      toast.error(
+        "Couldn't resend invite",
+        err instanceof Error ? err.message : "Please try again.",
+      );
+    },
   });
 
   const team = settingsQuery.data?.team ?? [];
@@ -742,7 +760,10 @@ export function Settings() {
                                         className="form-control"
                                         style={{
                                           height: 28,
-                                          padding: "0 8px",
+                                          // Keep right room for the chevron
+                                          // background (drawn at right 10px) —
+                                          // a plain "0 8px" shorthand clips it.
+                                          padding: "0 28px 0 8px",
                                           fontSize: "12px",
                                           width: "auto",
                                         }}
@@ -1572,15 +1593,6 @@ export function Settings() {
             profile.
           </div>
         </div>
-        {inviteMut.isError && (
-          <div
-            style={{ fontSize: "12.5px", color: "var(--danger-fg)" }}
-          >
-            {inviteMut.error instanceof Error
-              ? inviteMut.error.message
-              : "Failed to send invite. Please retry."}
-          </div>
-        )}
       </Modal>
 
       {/* Delete user confirm modal */}
