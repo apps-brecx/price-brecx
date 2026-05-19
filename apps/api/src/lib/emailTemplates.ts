@@ -27,8 +27,16 @@ export function buyBoxLossEmailHtml(opts: {
   rows: LostBuyboxRow[];
   marketplaceId: string | null;
   reportUrl: string;
+  /** ISO timestamp of the scan the digest is based on (optional). */
+  scannedAt?: string | null;
 }): string {
-  const { rows, marketplaceId, reportUrl } = opts;
+  const { rows, marketplaceId, reportUrl, scannedAt } = opts;
+  const scannedLabel = scannedAt
+    ? new Date(scannedAt).toLocaleString("en-US", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : null;
   const top = rows.slice(0, 10);
   const bodyRows = top
     .map(
@@ -70,11 +78,11 @@ export function buyBoxLossEmailHtml(opts: {
             </tr>
             <tr>
               <td style="padding:32px;">
-                <h1 style="margin:0 0 8px;font-size:20px;color:#111827;">Buy Box lost</h1>
-                <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151;">
+                <h1 style="margin:0 0 8px;font-size:20px;color:#111827;">Buy Box loss digest</h1>
+                <p style="margin:0 0 6px;font-size:14px;line-height:1.6;color:#374151;">
                   <strong>${rows.length}</strong> ASIN${
                     rows.length === 1 ? "" : "s"
-                  } no longer winning the Buy Box${
+                  } currently not winning the Buy Box${
                     marketplaceId
                       ? ` in <code style="font-family:ui-monospace,monospace;font-size:12px;background:#f3f4f6;padding:2px 6px;border-radius:4px;">${escapeHtml(
                           marketplaceId,
@@ -82,6 +90,13 @@ export function buyBoxLossEmailHtml(opts: {
                       : ""
                   }.
                 </p>
+                ${
+                  scannedLabel
+                    ? `<p style="margin:0 0 20px;font-size:12px;color:#9ca3af;">Based on the latest scan · ${escapeHtml(
+                        scannedLabel,
+                      )}</p>`
+                    : `<div style="height:14px;"></div>`
+                }
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e6e8eb;border-radius:8px;overflow:hidden;border-collapse:separate;">
                   <thead>
                     <tr style="background:#f9fafb;">
@@ -115,7 +130,7 @@ export function buyBoxLossEmailHtml(opts: {
             <tr>
               <td style="padding:16px 32px;background:#f9fafb;border-top:1px solid #e6e8eb;">
                 <p style="margin:0;font-size:11px;color:#9ca3af;">
-                  You're receiving this because you ran a Buy Box scan on Priceobo.
+                  You're receiving this because Buy Box alerts are enabled for your workspace. Manage the schedule in Priceobo → Buy Box Alert.
                 </p>
               </td>
             </tr>

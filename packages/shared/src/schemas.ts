@@ -302,6 +302,35 @@ export const ignoreCreateSchema = z.object({
 });
 export type IgnoreCreateInput = z.infer<typeof ignoreCreateSchema>;
 
+/* ---------------------- Buy Box Alert --------------------------- */
+
+const HHMM = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Time must be HH:MM (24-hour)");
+
+/** Scheduled buy-box-loss email digest config (one per workspace). */
+export const buyboxAlertSchema = z.object({
+  enabled: z.boolean(),
+  /** Local time of day to send the digest, "HH:MM" 24-hour. */
+  sendTime: HHMM,
+  timezone: z.string(),
+  emails: z.array(z.string().email()),
+  /** Local date (YYYY-MM-DD) the digest was last handled; null = never. */
+  lastSentOn: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+});
+export type BuyboxAlert = z.infer<typeof buyboxAlertSchema>;
+
+export const buyboxAlertUpdateSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    sendTime: HHMM.optional(),
+    timezone: z.string().min(1).max(64).optional(),
+    emails: z.array(z.string().email()).max(20).optional(),
+  })
+  .refine((b) => Object.keys(b).length > 0, { message: "No fields to update" });
+export type BuyboxAlertUpdateInput = z.infer<typeof buyboxAlertUpdateSchema>;
+
 /* -------------------------- Activity ---------------------------- */
 
 export const activitySchema = z.object({

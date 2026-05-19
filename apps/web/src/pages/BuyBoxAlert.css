@@ -1,0 +1,63 @@
+/* Buy Box Alert page — co-located styling. */
+
+.bba-card {
+  max-width: 620px;
+}
+
+.bba-note {
+  font-size: 12.5px;
+  color: var(--text-3);
+  line-height: 1.6;
+  margin: 0 0 18px;
+}
+
+.bba-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.bba-row:last-of-type {
+  border-bottom: none;
+}
+.bba-row .bba-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.bba-row .bba-sub {
+  font-size: 11.5px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.bba-toggle {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.bba-toggle.on {
+  background: var(--brand-600);
+  border-color: var(--brand-600);
+}
+.bba-toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.bba-toggle.on::after {
+  transform: translateX(18px);
+}

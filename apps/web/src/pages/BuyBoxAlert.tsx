@@ -1,0 +1,200 @@
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { BuyboxAlert } from "@fbm/shared";
+import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { relativeTime } from "../lib/format";
+import { Loading, ErrorState } from "../components/EmptyState";
+import { useToast } from "../components/Toast";
+import "./BuyBoxAlert.css";
+
+const browserTz =
+  Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
+
+/** Curated IANA timezones for the digest schedule. */
+const TIMEZONES: { value: string; label: string }[] = [
+  { value: "America/New_York", label: "America/New_York — US Eastern" },
+  { value: "America/Chicago", label: "America/Chicago — US Central" },
+  { value: "America/Denver", label: "America/Denver — US Mountain" },
+  { value: "America/Los_Angeles", label: "America/Los_Angeles — US Pacific" },
+  { value: "Asia/Dhaka", label: "Asia/Dhaka — Bangladesh" },
+  { value: "Asia/Kolkata", label: "Asia/Kolkata — India" },
+  { value: "Asia/Dubai", label: "Asia/Dubai — Gulf" },
+  { value: "Europe/London", label: "Europe/London — UK" },
+  { value: "Europe/Berlin", label: "Europe/Berlin — Central Europe" },
+  { value: "Asia/Shanghai", label: "Asia/Shanghai — China" },
+  { value: "Australia/Sydney", label: "Australia/Sydney" },
+  { value: "UTC", label: "UTC" },
+];
+
+export function BuyBoxAlert() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { user } = useAuth();
+
+  const query = useQuery({
+    queryKey: ["buybox-alert"],
+    queryFn: () => api.get<BuyboxAlert>("/buybox-alert"),
+  });
+
+  const [enabled, setEnabled] = useState(false);
+  const [sendTime, setSendTime] = useState("09:00");
+  const [timezone, setTimezone] = useState(browserTz);
+  const [emailsText, setEmailsText] = useState("");
+
+  // Hydrate the form once the settings load.
+  useEffect(() => {
+    const d = query.data;
+    if (!d) return;
+    setEnabled(d.enabled);
+    setSendTime(d.sendTime);
+    setTimezone(d.timezone);
+    setEmailsText(
+      d.emails.length ? d.emails.join(", ") : (user?.email ?? ""),
+    );
+  }, [query.data, user?.email]);
+
+  const save = useMutation({
+    mutationFn: () => {
+      const emails = emailsText
+        .split(/[,\n;]+/)
+        .map((e) => e.trim())
+        .filter(Boolean);
+      return api.put<BuyboxAlert>("/buybox-alert", {
+        enabled,
+        sendTime,
+        timezone,
+        emails,
+      });
+    },
+    onSuccess: (data) => {
+      qc.setQueryData(["buybox-alert"], data);
+      toast.success(
+        "Saved",
+        data.enabled
+          ? `You'll get the Buy Box loss digest daily at ${data.sendTime}.`
+          : "Buy Box email alerts are turned off.",
+      );
+    },
+    onError: (err) =>
+      toast.error(
+        "Couldn't save",
+        err instanceof Error ? err.message : "Check the emails and try again.",
+      ),
+  });
+
+  if (query.isLoading) return <Loading />;
+  if (query.isError) return <ErrorState />;
+
+  return (
+    <div>
+      <div className="card bba-card" style={{ padding: 22 }}>
+        <p className="bba-note">
+          The Lost Buy Box report refreshes automatically every hour. Enable
+          this to get one email a day — at the time you choose — listing every
+          ASIN currently not winning the Buy Box. No email is sent on days
+          where you're winning everything.
+        </p>
+
+        <div className="bba-row">
+          <div>
+            <div className="bba-label">Email alerts</div>
+            <div className="bba-sub">
+              Turn the daily Buy Box loss digest on or off.
+            </div>
+          </div>
+          <div
+            className={"bba-toggle" + (enabled ? " on" : "")}
+            role="switch"
+            aria-checked={enabled}
+            aria-label="Enable email alerts"
+            onClick={() => setEnabled((v) => !v)}
+          />
+        </div>
+
+        <div className="bba-row">
+          <div>
+            <div className="bba-label">Send time</div>
+            <div className="bba-sub">
+              Local time of day to send the digest.
+            </div>
+          </div>
+          <input
+            type="time"
+            className="form-control"
+            style={{ maxWidth: 140 }}
+            value={sendTime}
+            onChange={(e) => setSendTime(e.target.value)}
+          />
+        </div>
+
+        <div className="bba-row">
+          <div>
+            <div className="bba-label">Timezone</div>
+            <div className="bba-sub">
+              The send time is interpreted in this timezone.
+            </div>
+          </div>
+          <select
+            className="form-control"
+            style={{ maxWidth: 300 }}
+            value={timezone}
+            onChange={(e) => setTimezone(e.target.value)}
+          >
+            {!TIMEZONES.some((t) => t.value === timezone) && (
+              <option value={timezone}>{timezone}</option>
+            )}
+            {TIMEZONES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="bba-row" style={{ alignItems: "flex-start" }}>
+          <div style={{ paddingTop: 6 }}>
+            <div className="bba-label">Recipients</div>
+            <div className="bba-sub">
+              Comma-separated email addresses.
+            </div>
+          </div>
+          <textarea
+            className="form-control"
+            style={{ maxWidth: 320, minHeight: 64, resize: "vertical" }}
+            placeholder="ops@brecx.com, alerts@brecx.com"
+            value={emailsText}
+            onChange={(e) => setEmailsText(e.target.value)}
+          />
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            marginTop: 18,
+          }}
+        >
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={save.isPending}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? "Saving…" : "Save changes"}
+          </button>
+          {query.data?.lastSentOn && (
+            <span style={{ fontSize: 12, color: "var(--text-3)" }}>
+              Last digest handled: {query.data.lastSentOn}
+            </span>
+          )}
+          {query.data?.updatedAt && !query.data.lastSentOn && (
+            <span style={{ fontSize: 12, color: "var(--text-3)" }}>
+              Updated {relativeTime(query.data.updatedAt)}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

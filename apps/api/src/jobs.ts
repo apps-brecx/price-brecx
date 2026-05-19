@@ -17,10 +17,37 @@ import {
   buyBoxLossEmailText,
 } from "./lib/emailTemplates.js";
 import { broadcast } from "./ws.js";
+import type { LostBuyboxRow } from "@fbm/shared";
+
+/** Local calendar date + HH:MM for a timezone, no external date lib. */
+function localParts(tz: string): { date: string; hm: string } {
+  const now = new Date();
+  try {
+    const date = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(now);
+    const hm = new Intl.DateTimeFormat("en-GB", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(now);
+    return { date, hm };
+  } catch {
+    return { date: now.toISOString().slice(0, 10), hm: "00:00" };
+  }
+}
 
 export const APPLY_PRICE_QUEUE = "apply-price";
 export const SYNC_AMAZON_QUEUE = "sync-amazon";
 export const LOST_BUYBOX_SCAN_QUEUE = "lost-buybox-scan";
+/** Hourly fan-out: enqueues a Lost Buy Box scan for every workspace. */
+export const LOST_BUYBOX_CRON_QUEUE = "lost-buybox-cron";
+/** Every 15 min: sends the Buy Box loss digest at each workspace's chosen time. */
+export const BUYBOX_ALERT_DIGEST_QUEUE = "buybox-alert-digest";
 
 export interface SyncAmazonJob {
   workspaceId: string;
@@ -203,26 +230,8 @@ export async function startJobs(): Promise<void> {
               "buybox_seller_id",
             )}
           `;
-          // Email the person who ran the scan (mirrors the source app, which
-          // notified the user who triggered Analyze). No-op if SMTP is unset.
-          await sendMail({
-            to: actor,
-            subject: `[Buy Box] ${result.rows.length} ASIN${
-              result.rows.length === 1 ? "" : "s"
-            } lost the Buy Box`,
-            html: buyBoxLossEmailHtml({
-              rows: result.rows,
-              marketplaceId,
-              reportUrl: `${appUrl}/buybox`,
-            }),
-            text: buyBoxLossEmailText({
-              rows: result.rows,
-              marketplaceId,
-              reportUrl: `${appUrl}/buybox`,
-            }),
-          }).catch((err) =>
-            logger.error({ err }, "Buy Box loss email failed"),
-          );
+          // Email is no longer sent here — it's a scheduled digest driven by
+          // the workspace's Buy Box Alert settings (BUYBOX_ALERT_DIGEST_QUEUE).
         }
 
         const amazon = getAmazonProvider();
@@ -290,6 +299,81 @@ export async function startJobs(): Promise<void> {
       }
     },
   );
+
+  // ---- Hourly auto-scan: fan out one scan per workspace ----
+  await boss.createQueue(LOST_BUYBOX_CRON_QUEUE);
+  await boss.work(LOST_BUYBOX_CRON_QUEUE, async () => {
+    const wss = await sql<{ id: string }[]>`select id from workspaces`;
+    for (const w of wss) {
+      await enqueueLostBuyboxScan({ workspaceId: w.id, actor: "system" });
+    }
+    logger.info(
+      { workspaces: wss.length },
+      "lost-buybox hourly cron fanned out",
+    );
+  });
+  await boss.schedule(LOST_BUYBOX_CRON_QUEUE, "0 * * * *");
+
+  // ---- Buy Box loss digest: emailed at each workspace's chosen time ----
+  await boss.createQueue(BUYBOX_ALERT_DIGEST_QUEUE);
+  await boss.work(BUYBOX_ALERT_DIGEST_QUEUE, async () => {
+    const settings = await sql<
+      {
+        workspaceId: string;
+        sendTime: string;
+        timezone: string;
+        emails: string[];
+        lastSentOn: string | null;
+        rows: LostBuyboxRow[] | null;
+        marketplaceId: string | null;
+        updatedAt: Date | null;
+      }[]
+    >`
+      select s.workspace_id as "workspaceId", s.send_time as "sendTime",
+             s.timezone, s.emails, s.last_sent_on as "lastSentOn",
+             r.rows, r.marketplace_id as "marketplaceId",
+             r.updated_at as "updatedAt"
+        from buybox_alert_settings s
+        left join lost_buybox_runs r on r.workspace_id = s.workspace_id
+       where s.enabled = true
+    `;
+    for (const s of settings) {
+      const { date, hm } = localParts(s.timezone);
+      if (s.lastSentOn === date) continue; // already handled today
+      if (hm < s.sendTime) continue; // not yet the chosen time
+      const rows = s.rows ?? [];
+      const emails = s.emails ?? [];
+      if (rows.length > 0 && emails.length > 0) {
+        await sendMail({
+          to: emails,
+          subject: `[Buy Box] ${rows.length} ASIN${
+            rows.length === 1 ? "" : "s"
+          } lost the Buy Box`,
+          html: buyBoxLossEmailHtml({
+            rows,
+            marketplaceId: s.marketplaceId ?? null,
+            reportUrl: `${appUrl}/buybox`,
+            scannedAt: s.updatedAt ? s.updatedAt.toISOString() : null,
+          }),
+          text: buyBoxLossEmailText({
+            rows,
+            marketplaceId: s.marketplaceId ?? null,
+            reportUrl: `${appUrl}/buybox`,
+          }),
+        }).catch((err) =>
+          logger.error({ err }, "Buy Box digest email failed"),
+        );
+      }
+      // Mark handled for today even when there were no losses, so we don't
+      // re-query every 15 min for the rest of the day.
+      await sql`
+        update buybox_alert_settings
+           set last_sent_on = ${date}, updated_at = now()
+         where workspace_id = ${s.workspaceId}
+      `;
+    }
+  });
+  await boss.schedule(BUYBOX_ALERT_DIGEST_QUEUE, "*/15 * * * *");
 
   logger.info("pg-boss started");
 }

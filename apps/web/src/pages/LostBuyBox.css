@@ -3,10 +3,25 @@
 .lbb-title {
   font-weight: 550;
   font-size: 13px;
-  max-width: 340px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.lbb-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 340px;
+  color: var(--text);
+  text-decoration: none;
+}
+.lbb-link:hover {
+  color: var(--brand-700);
+}
+.lbb-link:hover .lbb-title {
+  text-decoration: underline;
 }
 
 .lbb-progress {

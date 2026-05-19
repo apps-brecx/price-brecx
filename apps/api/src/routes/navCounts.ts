@@ -19,6 +19,7 @@ export default async function navCountsRoutes(app: FastifyInstance) {
         automation: number;
         priceAlerts: number;
         salesAlerts: number;
+        lostBuybox: number;
       }[]
     >`
       select
@@ -35,7 +36,10 @@ export default async function navCountsRoutes(app: FastifyInstance) {
              and acknowledged = false) as "priceAlerts",
         (select count(*)::int from alerts
            where workspace_id = ${wsId} and kind = 'sales'
-             and acknowledged = false) as "salesAlerts"
+             and acknowledged = false) as "salesAlerts",
+        coalesce((select jsonb_array_length(rows)
+           from lost_buybox_runs
+           where workspace_id = ${wsId}), 0)::int as "lostBuybox"
     `;
     return row;
   });

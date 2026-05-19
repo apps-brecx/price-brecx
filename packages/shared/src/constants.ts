@@ -86,6 +86,7 @@ export const NAV_PAGES = [
   "buybox",
   "price-alert-v2",
   "sales-alert",
+  "buybox-alert",
   "report",
   "activity-log",
   "status",

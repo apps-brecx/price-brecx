@@ -15,6 +15,7 @@ interface NavCounts {
   automation: number;
   priceAlerts: number;
   salesAlerts: number;
+  lostBuybox: number;
 }
 
 interface Alert {
@@ -40,6 +41,7 @@ const TITLES: Record<string, [string, string]> = {
   "/buybox": ["Lost Buy Box", "Lost Buy Box"],
   "/price-alert-v2": ["Price Alert", "Price Alert"],
   "/sales-alert": ["Sales Alert", "Sales Alert"],
+  "/buybox-alert": ["Buy Box Alert", "Buy Box Alert"],
   "/report": ["Sales Report", "Reports"],
   "/activity-log": ["Activity Log", "Activity Log"],
   "/status": ["Schedule Status", "Status"],
@@ -285,6 +287,14 @@ export function AppLayout() {
           <NavLink to="/buybox" className={navClass}>
             {ICONS.buybox}
             Lost Buy Box
+            {!!counts?.lostBuybox && (
+              <span
+                className="nav-badge"
+                style={{ background: "var(--danger-bg)", color: "var(--danger-fg)", border: "none" }}
+              >
+                {navBadge(counts?.lostBuybox)}
+              </span>
+            )}
           </NavLink>
         </div>
 
@@ -313,6 +323,10 @@ export function AppLayout() {
                 {counts.salesAlerts}
               </span>
             )}
+          </NavLink>
+          <NavLink to="/buybox-alert" className={navClass}>
+            {ICONS.buybox}
+            Buy Box Alert
           </NavLink>
         </div>
 

@@ -24,6 +24,101 @@ const money = (n: number | null) => (n == null ? "—" : `$${n.toFixed(2)}`);
 const sellerShort = (s: string | null) =>
   s ? `${s.slice(0, 5)}…${s.slice(-3)}` : "—";
 
+/** Amazon listing URL for an ASIN. */
+const amazonUrl = (asin: string) => `https://www.amazon.com/dp/${asin}`;
+
+const CopyIcon = () => (
+  <svg
+    width="11"
+    height="11"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    style={{ opacity: 0.6 }}
+  >
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
+const ExtLinkIcon = () => (
+  <svg
+    width="11"
+    height="11"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    style={{ flex: "none", opacity: 0.7 }}
+  >
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    <polyline points="15 3 21 3 21 9" />
+    <line x1="10" y1="14" x2="21" y2="3" />
+  </svg>
+);
+
+/** CSV-escape a cell (quote when it contains a comma/quote/newline). */
+function csvCell(v: string | number | null): string {
+  const s = v == null ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Product name (links to the Amazon listing) + click-to-copy ASIN & SKU. */
+function ProductCell({
+  asin,
+  sku,
+  productName,
+  onCopy,
+}: {
+  asin: string;
+  sku: string | null;
+  productName: string | null;
+  onCopy: (text: string, label: string) => void;
+}) {
+  return (
+    <td>
+      <div style={{ minWidth: 0, maxWidth: 360 }}>
+        <a
+          className="lbb-link"
+          href={amazonUrl(asin)}
+          target="_blank"
+          rel="noreferrer"
+          title={productName ?? asin}
+        >
+          <span className="lbb-title">{productName ?? asin}</span>
+          <ExtLinkIcon />
+        </a>
+        <div
+          style={{
+            display: "flex",
+            gap: 5,
+            marginTop: 3,
+            flexWrap: "wrap",
+          }}
+        >
+          <span
+            className="copy-btn"
+            title="Click to copy ASIN"
+            onClick={() => onCopy(asin, "ASIN")}
+          >
+            {asin} <CopyIcon />
+          </span>
+          {sku && (
+            <span
+              className="copy-btn"
+              title="Click to copy SKU"
+              onClick={() => onCopy(sku, "SKU")}
+            >
+              {sku} <CopyIcon />
+            </span>
+          )}
+        </div>
+      </div>
+    </td>
+  );
+}
+
 type Tab = "losses" | "ignored";
 
 export function LostBuyBox() {
@@ -31,6 +126,7 @@ export function LostBuyBox() {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>("losses");
   const [search, setSearch] = useState("");
+  const [reasonFilter, setReasonFilter] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectedIgnored, setSelectedIgnored] = useState<Set<string>>(
     new Set(),
@@ -150,16 +246,72 @@ export function LostBuyBox() {
   const ignoredItems = ignored.data?.items ?? [];
   const scanning = progress != null || scan.isPending;
 
+  function copy(text: string, label: string) {
+    void navigator.clipboard?.writeText(text);
+    toast.success("Copied", `${label} copied to clipboard.`);
+  }
+
+  function exportCsv() {
+    if (rows.length === 0) return;
+    const header = [
+      "ASIN",
+      "SKU",
+      "Product",
+      "My Price",
+      "Buy Box",
+      "Winner",
+      "Reason",
+    ];
+    const lines = [
+      header.join(","),
+      ...rows.map((r) =>
+        [
+          r.asin,
+          r.sellerSku ?? "",
+          r.productName ?? "",
+          r.myPrice ?? "",
+          r.buyboxPrice ?? "",
+          r.buyboxSellerId ?? "",
+          r.reason,
+        ]
+          .map(csvCell)
+          .join(","),
+      ),
+    ];
+    const blob = new Blob([lines.join("\r\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `lost-buybox-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const reasonCounts = useMemo(() => {
+    const c: Record<string, number> = {
+      all: rows.length,
+      other_seller_winning: 0,
+      no_featured_offer: 0,
+      unknown_winner_anonymized: 0,
+    };
+    for (const r of rows) c[r.reason] = (c[r.reason] ?? 0) + 1;
+    return c;
+  }, [rows]);
+
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
+    return rows.filter((r) => {
+      if (reasonFilter !== "all" && r.reason !== reasonFilter) return false;
+      if (!q) return true;
+      return (
         r.asin.toLowerCase().includes(q) ||
         (r.sellerSku ?? "").toLowerCase().includes(q) ||
-        (r.productName ?? "").toLowerCase().includes(q),
-    );
-  }, [rows, search]);
+        (r.productName ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [rows, search, reasonFilter]);
 
   const filteredIgnored = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -377,6 +529,26 @@ export function LostBuyBox() {
           />
         </div>
         <button
+          className="btn btn-secondary btn-sm"
+          title="Download the current report as CSV"
+          disabled={rows.length === 0}
+          onClick={exportCsv}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Export
+        </button>
+        <button
           className="btn btn-primary btn-sm"
           title="Pull listings and check the Buy Box on every ASIN"
           disabled={scanning}
@@ -395,6 +567,42 @@ export function LostBuyBox() {
           {scanning ? "Scanning…" : "Run scan"}
         </button>
       </div>
+
+      {/* Reason filters (losses tab) */}
+      {tab === "losses" && rows.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 14,
+            flexWrap: "wrap",
+          }}
+        >
+          {(
+            [
+              ["all", "All"],
+              ["other_seller_winning", REASON_LABEL.other_seller_winning],
+              ["no_featured_offer", REASON_LABEL.no_featured_offer],
+              [
+                "unknown_winner_anonymized",
+                REASON_LABEL.unknown_winner_anonymized,
+              ],
+            ] as const
+          ).map(([key, label]) => (
+            <div
+              key={key}
+              className={
+                "filter-chip" + (reasonFilter === key ? " active" : "")
+              }
+              onClick={() => setReasonFilter(key)}
+            >
+              {label}{" "}
+              <span className="count">{reasonCounts[key] ?? 0}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Selection / bulk-ignore bar (losses tab) */}
       {tab === "losses" && filteredRows.length > 0 && (
@@ -555,26 +763,12 @@ export function LostBuyBox() {
                         onChange={() => toggleRow(r.asin)}
                       />
                     </td>
-                    <td>
-                      <div style={{ minWidth: 0, maxWidth: 360 }}>
-                        <div className="lbb-title">
-                          {r.productName ?? r.asin}
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 5,
-                            marginTop: 3,
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          <span className="copy-btn">{r.asin}</span>
-                          {r.sellerSku && (
-                            <span className="copy-btn">{r.sellerSku}</span>
-                          )}
-                        </div>
-                      </div>
-                    </td>
+                    <ProductCell
+                      asin={r.asin}
+                      sku={r.sellerSku}
+                      productName={r.productName}
+                      onCopy={copy}
+                    />
                     <td
                       style={{
                         textAlign: "right",
@@ -674,26 +868,12 @@ export function LostBuyBox() {
                         onChange={() => toggleIgnRow(r.asin)}
                       />
                     </td>
-                    <td>
-                      <div style={{ minWidth: 0, maxWidth: 360 }}>
-                        <div className="lbb-title">
-                          {r.productName ?? r.asin}
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 5,
-                            marginTop: 3,
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          <span className="copy-btn">{r.asin}</span>
-                          {r.sellerSku && (
-                            <span className="copy-btn">{r.sellerSku}</span>
-                          )}
-                        </div>
-                      </div>
-                    </td>
+                    <ProductCell
+                      asin={r.asin}
+                      sku={r.sellerSku}
+                      productName={r.productName}
+                      onCopy={copy}
+                    />
                     <td
                       style={{
                         textAlign: "right",
