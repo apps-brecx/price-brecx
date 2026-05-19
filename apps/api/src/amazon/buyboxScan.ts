@@ -112,10 +112,16 @@ export async function runLostBuyboxScan(
     ...new Set(filtered.map((l) => l.asin!.toUpperCase())),
   ];
   const byAsin = new Map<string, (typeof filtered)[number]>();
+  const skusByAsin = new Map<string, string[]>();
   for (const l of filtered) {
     const key = l.asin!.toUpperCase();
     const cur = byAsin.get(key);
     if (!cur || (l.quantity ?? 0) > (cur.quantity ?? 0)) byAsin.set(key, l);
+    if (l.sku) {
+      const arr = skusByAsin.get(key) ?? [];
+      if (!arr.includes(l.sku)) arr.push(l.sku);
+      skusByAsin.set(key, arr);
+    }
   }
 
   onProgress({
@@ -202,10 +208,13 @@ export async function runLostBuyboxScan(
   const rows: LostBuyboxRow[] = allRows
     .filter((r) => r.missed && r.reason !== "api_error")
     .map((r) => {
-      const l = byAsin.get(r.asin.toUpperCase());
+      const key = r.asin.toUpperCase();
+      const l = byAsin.get(key);
+      const skus = skusByAsin.get(key) ?? [];
       return {
         asin: r.asin,
-        sellerSku: l?.sku ?? null,
+        sellerSku: l?.sku ?? skus[0] ?? null,
+        skus,
         productName: l?.title ?? null,
         myPrice: r.myPrice,
         buyboxPrice: r.buyboxPrice,

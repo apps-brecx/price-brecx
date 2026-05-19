@@ -249,7 +249,10 @@ export type LostBuyboxReason = (typeof LOST_BUYBOX_REASONS)[number];
 /** One row of a Lost Buy Box report — an ASIN we are not winning. */
 export const lostBuyboxRowSchema = z.object({
   asin: z.string(),
+  /** Primary seller SKU (highest-quantity listing) — kept for export/snapshot. */
   sellerSku: z.string().nullable(),
+  /** Every seller SKU mapped to this ASIN (a seller can list it many times). */
+  skus: z.array(z.string()).default([]),
   productName: z.string().nullable(),
   myPrice: z.number().nullable(),
   buyboxPrice: z.number().nullable(),

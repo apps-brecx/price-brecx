@@ -64,15 +64,16 @@ function csvCell(v: string | number | null): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** Product name (links to the Amazon listing) + click-to-copy ASIN & SKU. */
+/** Product name (links to the Amazon listing) + click-to-copy ASIN & every
+ *  seller SKU mapped to that ASIN. */
 function ProductCell({
   asin,
-  sku,
+  skus,
   productName,
   onCopy,
 }: {
   asin: string;
-  sku: string | null;
+  skus: string[];
   productName: string | null;
   onCopy: (text: string, label: string) => void;
 }) {
@@ -104,15 +105,16 @@ function ProductCell({
           >
             {asin} <CopyIcon />
           </span>
-          {sku && (
+          {skus.map((sku) => (
             <span
+              key={sku}
               className="copy-btn"
               title="Click to copy SKU"
               onClick={() => onCopy(sku, "SKU")}
             >
               {sku} <CopyIcon />
             </span>
-          )}
+          ))}
         </div>
       </div>
     </td>
@@ -267,7 +269,7 @@ export function LostBuyBox() {
       ...rows.map((r) =>
         [
           r.asin,
-          r.sellerSku ?? "",
+          r.skus?.length ? r.skus.join("; ") : (r.sellerSku ?? ""),
           r.productName ?? "",
           r.myPrice ?? "",
           r.buyboxPrice ?? "",
@@ -305,9 +307,10 @@ export function LostBuyBox() {
     return rows.filter((r) => {
       if (reasonFilter !== "all" && r.reason !== reasonFilter) return false;
       if (!q) return true;
+      const skus = r.skus?.length ? r.skus : r.sellerSku ? [r.sellerSku] : [];
       return (
         r.asin.toLowerCase().includes(q) ||
-        (r.sellerSku ?? "").toLowerCase().includes(q) ||
+        skus.some((s) => s.toLowerCase().includes(q)) ||
         (r.productName ?? "").toLowerCase().includes(q)
       );
     });
@@ -765,7 +768,7 @@ export function LostBuyBox() {
                     </td>
                     <ProductCell
                       asin={r.asin}
-                      sku={r.sellerSku}
+                      skus={r.skus ?? (r.sellerSku ? [r.sellerSku] : [])}
                       productName={r.productName}
                       onCopy={copy}
                     />
@@ -870,7 +873,7 @@ export function LostBuyBox() {
                     </td>
                     <ProductCell
                       asin={r.asin}
-                      sku={r.sellerSku}
+                      skus={r.sellerSku ? [r.sellerSku] : []}
                       productName={r.productName}
                       onCopy={copy}
                     />
