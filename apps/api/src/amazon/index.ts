@@ -10,19 +10,19 @@ export function getAmazonProvider(): AmazonProvider {
   if (provider) return provider;
 
   const hasCreds =
-    env.SPAPI_REFRESH_TOKEN &&
-    env.SPAPI_LWA_APP_ID &&
-    env.SPAPI_LWA_CLIENT_SECRET &&
-    env.SPAPI_SELLER_ID &&
-    env.SPAPI_MARKETPLACE_ID;
+    env.REFRESH_TOKEN &&
+    env.LWA_APP_ID &&
+    env.LWA_CLIENT_SECRET &&
+    env.SELLER_ID &&
+    env.MARKETPLACE_ID;
 
   if (hasCreds) {
     provider = new SpapiProvider({
-      refreshToken: env.SPAPI_REFRESH_TOKEN!,
-      lwaAppId: env.SPAPI_LWA_APP_ID!,
-      lwaClientSecret: env.SPAPI_LWA_CLIENT_SECRET!,
-      sellerId: env.SPAPI_SELLER_ID!,
-      marketplaceId: env.SPAPI_MARKETPLACE_ID!,
+      refreshToken: env.REFRESH_TOKEN!,
+      lwaAppId: env.LWA_APP_ID!,
+      lwaClientSecret: env.LWA_CLIENT_SECRET!,
+      sellerId: env.SELLER_ID!,
+      marketplaceId: env.MARKETPLACE_ID!,
       endpoint: env.SPAPI_ENDPOINT,
     });
     logger.info("Amazon SP-API: live provider active");

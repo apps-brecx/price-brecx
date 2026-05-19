@@ -38,12 +38,13 @@ const envSchema = z.object({
   R2_BUCKET: z.string().optional(),
   R2_PUBLIC_BASE_URL: z.string().optional(),
 
-  // Amazon SP-API (LWA) — when absent the stub provider is used.
-  SPAPI_REFRESH_TOKEN: z.string().optional(),
-  SPAPI_LWA_APP_ID: z.string().optional(),
-  SPAPI_LWA_CLIENT_SECRET: z.string().optional(),
-  SPAPI_SELLER_ID: z.string().optional(),
-  SPAPI_MARKETPLACE_ID: z.string().optional(),
+  // Amazon SP-API (LWA) — when absent the stub provider is used. Names match
+  // the legacy price-scheduling-server so values copy across 1:1.
+  REFRESH_TOKEN: z.string().optional(),
+  LWA_APP_ID: z.string().optional(),
+  LWA_CLIENT_SECRET: z.string().optional(),
+  SELLER_ID: z.string().optional(),
+  MARKETPLACE_ID: z.string().optional(),
   SPAPI_ENDPOINT: z.string().default("https://sellingpartnerapi-na.amazon.com"),
 });
 

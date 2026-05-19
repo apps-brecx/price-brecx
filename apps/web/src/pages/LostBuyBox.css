@@ -1,0 +1,58 @@
+/* Lost Buy Box page — co-located styling. */
+
+.lbb-title {
+  font-weight: 550;
+  font-size: 13px;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lbb-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--info-bg);
+  background: var(--info-bg);
+  color: var(--info-fg);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.lbb-progress .spinner-sm {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: lbb-spin 0.7s linear infinite;
+  flex: none;
+}
+@keyframes lbb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.lbb-reason {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.lbb-reason.other_seller_winning {
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+}
+.lbb-reason.no_featured_offer {
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+}
+.lbb-reason.unknown_winner_anonymized {
+  background: var(--surface-2);
+  color: var(--text-2);
+}

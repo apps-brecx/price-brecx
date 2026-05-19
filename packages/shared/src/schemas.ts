@@ -84,6 +84,8 @@ export const skuSchema = z.object({
   title: z.string(),
   imageUrl: z.string().nullable(),
   channel: z.enum(SALES_CHANNELS),
+  /** Amazon fulfillment-channel: "DEFAULT" => FBM, else (AMAZON_*) => FBA. */
+  fulfillmentChannel: z.string().nullable(),
   price: z.number(),
   basePrice: z.number().nullable(),
   cost: z.number().nullable(),
@@ -102,6 +104,7 @@ export const skuCreateSchema = skuSchema
   .partial({
     asin: true,
     imageUrl: true,
+    fulfillmentChannel: true,
     basePrice: true,
     cost: true,
     stock: true,
@@ -232,6 +235,72 @@ export const notificationRuleCreateSchema = z.object({
   active: z.boolean().default(true),
 });
 export type NotificationRuleCreateInput = z.infer<typeof notificationRuleCreateSchema>;
+
+/* ------------------------ Lost Buy Box -------------------------- */
+
+/** Why a SKU is not winning the Buy Box (mirrors the buy-box analyzer). */
+export const LOST_BUYBOX_REASONS = [
+  "other_seller_winning",
+  "no_featured_offer",
+  "unknown_winner_anonymized",
+] as const;
+export type LostBuyboxReason = (typeof LOST_BUYBOX_REASONS)[number];
+
+/** One row of a Lost Buy Box report — an ASIN we are not winning. */
+export const lostBuyboxRowSchema = z.object({
+  asin: z.string(),
+  sellerSku: z.string().nullable(),
+  productName: z.string().nullable(),
+  myPrice: z.number().nullable(),
+  buyboxPrice: z.number().nullable(),
+  buyboxSellerId: z.string().nullable(),
+  reason: z.string(),
+});
+export type LostBuyboxRow = z.infer<typeof lostBuyboxRowSchema>;
+
+export const lostBuyboxSummarySchema = z.object({
+  total: z.number().int(),
+  won: z.number().int(),
+  missed: z.number().int(),
+  missedOtherSeller: z.number().int(),
+  missedNoFeatured: z.number().int(),
+  missedAnonymized: z.number().int(),
+  errors: z.number().int(),
+});
+export type LostBuyboxSummary = z.infer<typeof lostBuyboxSummarySchema>;
+
+/** The most-recent scan snapshot for a workspace (null until first scan). */
+export const lostBuyboxRunSchema = z.object({
+  marketplaceId: z.string().nullable(),
+  inventoryCount: z.number().int(),
+  summary: lostBuyboxSummarySchema,
+  rows: z.array(lostBuyboxRowSchema),
+  erroredAsins: z.array(z.string()),
+  updatedAt: z.string().nullable(),
+});
+export type LostBuyboxRun = z.infer<typeof lostBuyboxRunSchema>;
+
+export const ignoredAsinSchema = z.object({
+  asin: z.string(),
+  note: z.string().nullable(),
+  sellerSku: z.string().nullable(),
+  productName: z.string().nullable(),
+  myPrice: z.number().nullable(),
+  buyboxPrice: z.number().nullable(),
+  buyboxSellerId: z.string().nullable(),
+  marketplaceId: z.string().nullable(),
+  ignoredAt: z.string(),
+});
+export type IgnoredAsin = z.infer<typeof ignoredAsinSchema>;
+
+/** Add one or more ASINs to the ignore list, optionally with report-row
+ * snapshots so the Ignored view keeps full context (SKU/product/prices). */
+export const ignoreCreateSchema = z.object({
+  asins: z.array(z.string().min(1)).min(1),
+  note: z.string().max(500).optional(),
+  rows: z.array(lostBuyboxRowSchema).optional(),
+});
+export type IgnoreCreateInput = z.infer<typeof ignoreCreateSchema>;
 
 /* -------------------------- Activity ---------------------------- */
 

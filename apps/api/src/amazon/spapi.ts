@@ -1,6 +1,14 @@
+import zlib from "node:zlib";
 import axios from "axios";
 import { logger } from "../logger.js";
-import type { AmazonProvider, ProductOffer, SpapiCredentials } from "./types.js";
+import type {
+  AmazonProvider,
+  CompetitiveSummaryResponse,
+  FbaQty,
+  ListingRow,
+  ProductOffer,
+  SpapiCredentials,
+} from "./types.js";
 
 /**
  * Live Amazon Selling Partner API provider. Logic is ported from the previous
@@ -13,19 +21,34 @@ export class SpapiProvider implements AmazonProvider {
 
   constructor(private readonly creds: SpapiCredentials) {}
 
+  get sellerId(): string {
+    return this.creds.sellerId;
+  }
+
   private async getAccessToken(): Promise<string> {
     if (this.accessToken && Date.now() < this.tokenExpiresAt - 60_000) {
       return this.accessToken;
     }
-    const res = await axios.post("https://api.amazon.com/auth/o2/token", {
+    // LWA requires application/x-www-form-urlencoded. .trim() guards against
+    // a stray newline/space pasted into the env value.
+    const body = new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: this.creds.refreshToken,
-      client_id: this.creds.lwaAppId,
-      client_secret: this.creds.lwaClientSecret,
+      refresh_token: this.creds.refreshToken.trim(),
+      client_id: this.creds.lwaAppId.trim(),
+      client_secret: this.creds.lwaClientSecret.trim(),
     });
-    this.accessToken = res.data.access_token as string;
-    this.tokenExpiresAt = Date.now() + (res.data.expires_in ?? 3600) * 1000;
-    return this.accessToken;
+    try {
+      const res = await axios.post(
+        "https://api.amazon.com/auth/o2/token",
+        body,
+        { headers: { "content-type": "application/x-www-form-urlencoded" } },
+      );
+      this.accessToken = res.data.access_token as string;
+      this.tokenExpiresAt = Date.now() + (res.data.expires_in ?? 3600) * 1000;
+      return this.accessToken;
+    } catch (err) {
+      throw spError("LWA token", err);
+    }
   }
 
   async updatePrice(sku: string, price: number) {
@@ -110,4 +133,297 @@ export class SpapiProvider implements AmazonProvider {
     });
     return res.data;
   }
+
+  private authHeaders(token: string) {
+    return { "x-amz-access-token": token, "content-type": "application/json" };
+  }
+
+  private wait(ms: number) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  /**
+   * Pull every listing via the GET_MERCHANT_LISTINGS_ALL_DATA report:
+   * create → poll until DONE → download the pre-signed doc → gunzip → parse TSV.
+   */
+  async getMerchantListings(): Promise<ListingRow[]> {
+    const token = await this.getAccessToken();
+    const base = this.creds.endpoint;
+
+    let create;
+    try {
+      create = await axios.post(
+        `${base}/reports/2021-06-30/reports`,
+        {
+          reportType: "GET_MERCHANT_LISTINGS_ALL_DATA",
+          marketplaceIds: [this.creds.marketplaceId],
+        },
+        { headers: this.authHeaders(token) },
+      );
+    } catch (err) {
+      throw spError("Reports create", err);
+    }
+    const reportId = create.data?.reportId as string | undefined;
+    if (!reportId) throw new Error("SP-API: no reportId returned");
+
+    // Poll: 5s, backing off +5s up to 60s, ≤40 tries.
+    let documentId: string | undefined;
+    let delay = 5_000;
+    for (let i = 0; i < 40; i++) {
+      await this.wait(delay);
+      const st = await axios.get(
+        `${base}/reports/2021-06-30/reports/${reportId}`,
+        { headers: this.authHeaders(token) },
+      );
+      const status = st.data?.processingStatus as string;
+      if (status === "DONE") {
+        documentId = st.data.reportDocumentId as string;
+        break;
+      }
+      if (status === "CANCELLED" || status === "FATAL") {
+        throw new Error(`SP-API report ${status}`);
+      }
+      if (delay < 60_000) delay += 5_000;
+    }
+    if (!documentId) throw new Error("SP-API report timed out");
+
+    const doc = await axios.get(
+      `${base}/reports/2021-06-30/documents/${documentId}`,
+      { headers: this.authHeaders(token) },
+    );
+    const docUrl = doc.data?.url as string;
+    const gz = doc.data?.compressionAlgorithm === "GZIP";
+
+    // Pre-signed S3 URL — no auth header.
+    const dl = await axios.get<ArrayBuffer>(docUrl, {
+      responseType: "arraybuffer",
+    });
+    const buf = Buffer.from(dl.data);
+    const text = gz
+      ? zlib.gunzipSync(buf).toString("utf-8")
+      : buf.toString("utf-8");
+    const rows = parseListingsTsv(text);
+    logger.info({ rows: rows.length }, "SP-API merchant listings parsed");
+    return rows;
+  }
+
+  /**
+   * Paginated FBA inventory summaries → seller-SKU → {fulfillable, pending}.
+   * `details=true` is mandatory or `inventoryDetails` is absent and both
+   * numbers come back 0 (this was the channel-stock-is-0 bug). startDateTime
+   * is intentionally omitted so every item is returned (legacy hardcoded a
+   * date which silently filtered items out).
+   */
+  async getFbaInventory(): Promise<Map<string, FbaQty>> {
+    const token = await this.getAccessToken();
+    const base = this.creds.endpoint;
+    const out = new Map<string, FbaQty>();
+    let nextToken: string | undefined;
+
+    for (let page = 0; page < 200; page++) {
+      let res;
+      try {
+        res = await axios.get(`${base}/fba/inventory/v1/summaries`, {
+          headers: this.authHeaders(token),
+          params: {
+            marketplaceIds: this.creds.marketplaceId,
+            details: true,
+            granularityType: "Marketplace",
+            granularityId: this.creds.marketplaceId,
+            ...(nextToken ? { nextToken } : {}),
+          },
+        });
+      } catch (err) {
+        throw spError("FBA inventory", err);
+      }
+      const summaries: Array<{
+        sellerSku?: string;
+        inventoryDetails?: {
+          fulfillableQuantity?: number;
+          reservedQuantity?: { pendingTransshipmentQuantity?: number };
+        };
+      }> = res.data?.payload?.inventorySummaries ?? [];
+      for (const s of summaries) {
+        if (!s.sellerSku) continue;
+        out.set(s.sellerSku, {
+          fulfillable: Number(s.inventoryDetails?.fulfillableQuantity ?? 0),
+          pendingTransship: Number(
+            s.inventoryDetails?.reservedQuantity?.pendingTransshipmentQuantity ??
+              0,
+          ),
+        });
+      }
+      nextToken = res.data?.pagination?.nextToken;
+      if (!nextToken) break;
+    }
+    return out;
+  }
+
+  /**
+   * Product Pricing API v2022-05-01 getCompetitiveSummary (batch). Ported from
+   * the Missed-Buy-Box app: SP-API signals a rate-limit as a 200 OK with a
+   * top-level `{errors:[{code:"QuotaExceeded"}]}`, NOT a 429 — so that case is
+   * detected and retried with exponential backoff alongside real 429/5xx.
+   */
+  async getCompetitiveSummary(
+    asins: string[],
+  ): Promise<CompetitiveSummaryResponse> {
+    if (asins.length === 0) return { responses: [] };
+    if (asins.length > 20) {
+      throw new Error("getCompetitiveSummary: max 20 ASINs per batch");
+    }
+    const base = this.creds.endpoint;
+    const includedData = ["featuredBuyingOptions", "lowestPricedOffers"];
+    const requests = asins.map((asin) => ({
+      asin: asin.trim().toUpperCase(),
+      marketplaceId: this.creds.marketplaceId,
+      includedData,
+      lowestPricedOffersInputs: [
+        { itemCondition: "New", offerType: "Consumer" },
+      ],
+      method: "GET",
+      uri: "/products/pricing/2022-05-01/items/competitiveSummary",
+    }));
+
+    const maxRetries = 4;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const token = await this.getAccessToken();
+      try {
+        const res = await axios.post(
+          `${base}/batches/products/pricing/2022-05-01/items/competitiveSummary`,
+          { requests },
+          {
+            headers: this.authHeaders(token),
+            timeout: 30_000,
+            validateStatus: () => true,
+          },
+        );
+        const data = res.data;
+
+        if (Array.isArray(data?.errors)) {
+          const quota = data.errors.find(
+            (e: { code?: string }) => e?.code === "QuotaExceeded",
+          );
+          if (quota) {
+            const e = new Error("QuotaExceeded") as Error & {
+              status?: number;
+              quotaExceeded?: boolean;
+            };
+            e.status = 429;
+            e.quotaExceeded = true;
+            throw e;
+          }
+          const first = data.errors[0];
+          throw new Error(
+            `SP-API competitiveSummary: ${first?.code ?? ""} ${
+              first?.message ?? JSON.stringify(data.errors)
+            }`.trim(),
+          );
+        }
+        if (!Array.isArray(data?.responses)) {
+          throw new Error(
+            `SP-API competitiveSummary: unexpected payload ${JSON.stringify(
+              data,
+            ).slice(0, 200)}`,
+          );
+        }
+        return { responses: data.responses };
+      } catch (err) {
+        lastErr = err;
+        const status =
+          (err as { status?: number }).status ??
+          (axios.isAxiosError(err) ? err.response?.status : undefined);
+        const quota = (err as { quotaExceeded?: boolean }).quotaExceeded;
+        const retriable =
+          quota ||
+          status === 429 ||
+          status === 500 ||
+          status === 502 ||
+          status === 503 ||
+          status === 504 ||
+          (err as { code?: string }).code === "ECONNRESET" ||
+          (err as { code?: string }).code === "ETIMEDOUT";
+        if (!retriable || attempt === maxRetries) break;
+        const baseDelay = quota ? 5_000 : 1_000;
+        const delay = baseDelay * 2 ** attempt + Math.random() * 1_000;
+        logger.warn(
+          { attempt: attempt + 1, status, quota },
+          "SP-API competitiveSummary retry",
+        );
+        await this.wait(delay);
+      }
+    }
+    throw spError("competitiveSummary", lastErr);
+  }
+}
+
+/**
+ * Turn an axios error into a message that names the real cause. LWA returns
+ * `{error, error_description}` (401 invalid_client = bad/rotated client
+ * secret; 400 invalid_grant = bad/expired refresh token); SP-API returns
+ * `{errors:[{code,message}]}`.
+ */
+function spError(label: string, err: unknown): Error {
+  if (axios.isAxiosError(err) && err.response) {
+    const data = err.response.data as
+      | {
+          error?: string;
+          error_description?: string;
+          errors?: Array<{ code?: string; message?: string }>;
+        }
+      | string
+      | undefined;
+    let detail: string;
+    if (typeof data === "string") {
+      detail = data.slice(0, 300);
+    } else if (data?.error) {
+      detail = data.error_description
+        ? `${data.error} — ${data.error_description}`
+        : data.error;
+    } else if (data?.errors?.[0]) {
+      const e = data.errors[0];
+      detail = `${e.code ?? ""} ${e.message ?? ""}`.trim();
+    } else {
+      detail = JSON.stringify(data ?? {}).slice(0, 300);
+    }
+    return new Error(`${label} ${err.response.status}: ${detail}`);
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+/** GET_MERCHANT_LISTINGS_ALL_DATA is a tab-separated file with a header row. */
+function parseListingsTsv(tsv: string): ListingRow[] {
+  const lines = tsv.split(/\r?\n/).filter((l) => l.length > 0);
+  if (lines.length < 2) return [];
+  const header = lines[0].split("\t").map((h) => h.trim());
+  const col = (name: string) => header.indexOf(name);
+  const iName = col("item-name");
+  const iSku = col("seller-sku");
+  const iAsin = col("asin1");
+  const iPrice = col("price");
+  const iQty = col("quantity");
+  const iImg = col("image-url");
+  const iFc = col("fulfillment-channel");
+  const iStatus = col("status");
+
+  const rows: ListingRow[] = [];
+  for (let r = 1; r < lines.length; r++) {
+    const c = lines[r].split("\t");
+    const sku = (c[iSku] ?? "").trim();
+    if (!sku) continue;
+    const priceRaw = (c[iPrice] ?? "").trim();
+    const price = priceRaw ? Number(priceRaw) : null;
+    rows.push({
+      sku,
+      asin: (c[iAsin] ?? "").trim() || null,
+      title: (c[iName] ?? "").trim() || sku,
+      price: price != null && !Number.isNaN(price) ? price : null,
+      quantity: Math.trunc(Number((c[iQty] ?? "0").trim())) || 0,
+      imageUrl: (c[iImg] ?? "").trim() || null,
+      fulfillmentChannel: (c[iFc] ?? "").trim() || null,
+      status: (c[iStatus] ?? "").trim() || "Unknown",
+    });
+  }
+  return rows;
 }

@@ -1,5 +1,11 @@
 import { logger } from "../logger.js";
-import type { AmazonProvider, ProductOffer } from "./types.js";
+import type {
+  AmazonProvider,
+  CompetitiveSummaryResponse,
+  FbaQty,
+  ListingRow,
+  ProductOffer,
+} from "./types.js";
 
 /**
  * No-credential fallback. It records the intent so the rest of the system
@@ -7,6 +13,7 @@ import type { AmazonProvider, ProductOffer } from "./types.js";
  */
 export class StubAmazonProvider implements AmazonProvider {
   readonly mode = "stub" as const;
+  readonly sellerId = null;
 
   async updatePrice(sku: string, price: number) {
     logger.warn(
@@ -22,5 +29,21 @@ export class StubAmazonProvider implements AmazonProvider {
 
   async getCatalogItem(): Promise<unknown> {
     return { stub: true };
+  }
+
+  async getMerchantListings(): Promise<ListingRow[]> {
+    logger.warn("Amazon SP-API not configured — merchant listings sync skipped");
+    return [];
+  }
+
+  async getFbaInventory(): Promise<Map<string, FbaQty>> {
+    return new Map();
+  }
+
+  async getCompetitiveSummary(): Promise<CompetitiveSummaryResponse> {
+    logger.warn(
+      "Amazon SP-API not configured — Buy Box scan returns no results",
+    );
+    return { responses: [] };
   }
 }

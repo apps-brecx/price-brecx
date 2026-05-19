@@ -37,7 +37,7 @@ const TITLES: Record<string, [string, string]> = {
   "/price-alert": ["Pricing", "Pricing"],
   "/pricing-v2": ["Pricing v2", "Pricing v2"],
   "/automation": ["Automation Rules", "Automation"],
-  "/buybox": ["Buy Box Manager", "Buy Box"],
+  "/buybox": ["Lost Buy Box", "Lost Buy Box"],
   "/price-alert-v2": ["Price Alert", "Price Alert"],
   "/sales-alert": ["Sales Alert", "Sales Alert"],
   "/report": ["Sales Report", "Reports"],
@@ -284,7 +284,7 @@ export function AppLayout() {
           </NavLink>
           <NavLink to="/buybox" className={navClass}>
             {ICONS.buybox}
-            Buy Box
+            Lost Buy Box
           </NavLink>
         </div>
 

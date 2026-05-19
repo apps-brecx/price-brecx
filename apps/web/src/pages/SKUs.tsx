@@ -19,6 +19,7 @@ import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
 import { StatusBadge, Tags } from "../components/Badges";
 import { Modal } from "../components/Modal";
 import { BarcodeScanner } from "../components/BarcodeScanner";
+import { useToast } from "../components/Toast";
 
 const PAGE_SIZE = 25;
 
@@ -60,6 +61,7 @@ function ProductImg({
 
 export function SKUs() {
   const qc = useQueryClient();
+  const toast = useToast();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -94,6 +96,20 @@ export function SKUs() {
       setCreateOpen(false);
       setDraft(emptyDraft);
     },
+  });
+
+  const syncMut = useMutation({
+    mutationFn: () => api.post<{ ok: boolean }>("/skus/sync"),
+    onSuccess: () =>
+      toast.info(
+        "Sync started",
+        "Pulling listings & stock from Amazon — the list refreshes automatically when it's done (can take a few minutes).",
+      ),
+    onError: (err) =>
+      toast.error(
+        "Couldn't start sync",
+        err instanceof Error ? err.message : "Please try again.",
+      ),
   });
 
   const favMut = useMutation({
@@ -168,6 +184,25 @@ export function SKUs() {
           />
         </div>
         <div style={{ flex: 1 }} />
+
+        <button
+          className="btn btn-secondary btn-sm"
+          title="Pull listings, prices and stock from Amazon"
+          disabled={syncMut.isPending}
+          onClick={() => syncMut.mutate()}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+          </svg>
+          {syncMut.isPending ? "Starting…" : "Sync from Amazon"}
+        </button>
 
         <button
           className="btn btn-secondary btn-sm"

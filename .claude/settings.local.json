@@ -22,7 +22,9 @@
       "Bash(xargs grep -l \"invite\" -i)",
       "Bash(grep -E \"\\\\.\\(ts|tsx|html|mjml|hbs\\)$\")",
       "Bash(xargs grep -l \"email\\\\|mailer\\\\|invite\\\\|invitation\")",
-      "Bash(awk *)"
+      "Bash(awk *)",
+      "Bash(pnpm --filter @fbm/api run typecheck)",
+      "Bash(pnpm --filter @fbm/web run typecheck)"
     ]
   }
 }

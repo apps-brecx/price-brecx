@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "../components/Toast";
 
 /**
  * Subscribes to the API WebSocket and invalidates affected queries when the
@@ -7,6 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
  */
 export function useRealtime(): void {
   const qc = useQueryClient();
+  const toast = useToast();
   useEffect(() => {
     const base = import.meta.env.VITE_API_URL ?? "";
     const url =
@@ -27,6 +29,58 @@ export function useRealtime(): void {
             qc.invalidateQueries({ queryKey: ["schedules"] });
             qc.invalidateQueries({ queryKey: ["dashboard"] });
             qc.invalidateQueries({ queryKey: ["activity"] });
+          } else if (msg.type === "lost_buybox_progress") {
+            const { type: _t, ...progress } = msg;
+            qc.setQueryData(["lost-buybox", "progress"], progress);
+          } else if (msg.type === "lost_buybox_synced") {
+            qc.setQueryData(["lost-buybox", "progress"], null);
+            qc.invalidateQueries({ queryKey: ["lost-buybox"] });
+            qc.invalidateQueries({ queryKey: ["activity"] });
+            qc.invalidateQueries({ queryKey: ["nav-counts"] });
+            if (msg.ok === false) {
+              toast.error(
+                "Buy Box scan failed",
+                msg.error || "See the Activity Log for details.",
+              );
+            } else if (msg.mode === "stub") {
+              toast.warning(
+                "Scan ran in stub mode",
+                "SP-API credentials not loaded — restart the API so apps/api/.env is read.",
+              );
+            } else if (!msg.count) {
+              toast.success(
+                "Buy Box scan finished",
+                "You're winning the Buy Box on every scanned ASIN.",
+              );
+            } else {
+              toast.warning(
+                `${msg.count} lost the Buy Box`,
+                "Open Lost Buy Box for the full report.",
+              );
+            }
+          } else if (msg.type === "skus_synced") {
+            qc.invalidateQueries({ queryKey: ["skus"] });
+            qc.invalidateQueries({ queryKey: ["nav-counts"] });
+            qc.invalidateQueries({ queryKey: ["dashboard"] });
+            qc.invalidateQueries({ queryKey: ["activity"] });
+            if (msg.ok === false) {
+              toast.error(
+                "Amazon sync failed",
+                msg.error || "See the Activity Log for details.",
+              );
+            } else if (msg.mode === "stub") {
+              toast.warning(
+                "Sync ran in stub mode",
+                "SP-API credentials not loaded — restart the API so apps/api/.env is read.",
+              );
+            } else if (!msg.count) {
+              toast.info(
+                "Amazon sync finished",
+                "No listings were returned for this seller account.",
+              );
+            } else {
+              toast.success(`Synced ${msg.count} SKUs from Amazon`);
+            }
           }
         } catch {
           /* ignore malformed frames */
@@ -41,5 +95,5 @@ export function useRealtime(): void {
       closed = true;
       ws?.close();
     };
-  }, [qc]);
+  }, [qc, toast]);
 }

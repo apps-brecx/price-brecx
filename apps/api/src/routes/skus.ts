@@ -3,6 +3,7 @@ import { z } from "zod";
 import { skuCreateSchema, skuUpdateSchema } from "@fbm/shared";
 import { sql, jsonb } from "../db.js";
 import { recordActivity } from "../lib/activity.js";
+import { enqueueAmazonSync } from "../jobs.js";
 
 const listQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -15,6 +16,7 @@ const listQuery = z.object({
 
 const selectCols = sql`
   id, sku, asin, title, image_url as "imageUrl", channel,
+  fulfillment_channel as "fulfillmentChannel",
   price::float8 as price, base_price::float8 as "basePrice",
   cost::float8 as cost, stock, sales_30d as "sales30d",
   status, favorite, tags,
@@ -47,6 +49,19 @@ export default async function skuRoutes(app: FastifyInstance) {
       limit ${q.pageSize} offset ${offset}
     `;
     return { items, total: count, page: q.page, pageSize: q.pageSize };
+  });
+
+  /**
+   * Kick off an Amazon → DB sync for the caller's workspace. Runs async via
+   * pg-boss (the merchant-listings report can take minutes); the SKUs list
+   * refreshes over the websocket ("skus_synced") when it finishes.
+   */
+  app.post("/skus/sync", async (req) => {
+    await enqueueAmazonSync({
+      workspaceId: req.user!.workspaceId,
+      actor: req.user!.email,
+    });
+    return { ok: true };
   });
 
   app.get("/skus/:id", async (req, reply) => {
