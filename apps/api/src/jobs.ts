@@ -5,6 +5,11 @@ import { sql, jsonb } from "./db.js";
 import { getAmazonProvider } from "./amazon/index.js";
 import { syncAmazonToSkus } from "./amazon/sync.js";
 import { runLostBuyboxScan } from "./amazon/buyboxScan.js";
+import {
+  beginScan,
+  endScan,
+  ScanCancelledError,
+} from "./amazon/scanControl.js";
 import { recordActivity } from "./lib/activity.js";
 import { sendMail } from "./mailer.js";
 import {
@@ -142,6 +147,7 @@ export async function startJobs(): Promise<void> {
     LOST_BUYBOX_SCAN_QUEUE,
     async ([job]) => {
       const { workspaceId, actor } = job.data;
+      const ctl = beginScan(workspaceId);
       try {
         const ignored = await sql<{ asin: string }[]>`
           select asin from ignored_asins where workspace_id = ${workspaceId}
@@ -150,8 +156,10 @@ export async function startJobs(): Promise<void> {
           ignored.map((r) => r.asin.toUpperCase()),
         );
 
-        const result = await runLostBuyboxScan(ignoredSet, (p) =>
-          broadcast(workspaceId, { type: "lost_buybox_progress", ...p }),
+        const result = await runLostBuyboxScan(
+          ignoredSet,
+          (p) => broadcast(workspaceId, { type: "lost_buybox_progress", ...p }),
+          ctl,
         );
 
         const marketplaceId = env.MARKETPLACE_ID ?? null;
@@ -243,22 +251,42 @@ export async function startJobs(): Promise<void> {
           "lost-buybox-scan job done",
         );
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.error({ err, workspaceId }, "lost-buybox-scan job failed");
-        await recordActivity({
-          workspaceId,
-          actor,
-          action: "updated",
-          entityType: "lost_buybox",
-          entityId: null,
-          summary: `Buy Box scan failed — ${msg}`,
-          meta: { error: msg },
-        });
-        broadcast(workspaceId, {
-          type: "lost_buybox_synced",
-          ok: false,
-          error: msg,
-        });
+        if (err instanceof ScanCancelledError) {
+          logger.info({ workspaceId }, "lost-buybox-scan cancelled");
+          await recordActivity({
+            workspaceId,
+            actor,
+            action: "updated",
+            entityType: "lost_buybox",
+            entityId: null,
+            summary: "Buy Box scan cancelled",
+            meta: { cancelled: true },
+          });
+          broadcast(workspaceId, {
+            type: "lost_buybox_synced",
+            ok: true,
+            cancelled: true,
+          });
+        } else {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error({ err, workspaceId }, "lost-buybox-scan job failed");
+          await recordActivity({
+            workspaceId,
+            actor,
+            action: "updated",
+            entityType: "lost_buybox",
+            entityId: null,
+            summary: `Buy Box scan failed — ${msg}`,
+            meta: { error: msg },
+          });
+          broadcast(workspaceId, {
+            type: "lost_buybox_synced",
+            ok: false,
+            error: msg,
+          });
+        }
+      } finally {
+        endScan(workspaceId, ctl);
       }
     },
   );

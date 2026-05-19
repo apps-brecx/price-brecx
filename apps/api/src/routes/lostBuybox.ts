@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { ignoreCreateSchema, type LostBuyboxRun } from "@fbm/shared";
 import { sql } from "../db.js";
 import { enqueueLostBuyboxScan } from "../jobs.js";
+import { requestCancel } from "../amazon/scanControl.js";
 
 const EMPTY_SUMMARY = {
   total: 0,
@@ -60,6 +62,13 @@ export default async function lostBuyboxRoutes(app: FastifyInstance) {
       actor: req.user!.email,
     });
     return { ok: true };
+  });
+
+  /** Cooperatively cancel the workspace's in-flight scan (stops after the
+   *  current batch). No-op if nothing is running. */
+  app.post("/lost-buybox/scan/cancel", async (req) => {
+    const ok = requestCancel(req.user!.workspaceId);
+    return { ok };
   });
 
   app.get("/lost-buybox/ignored", async (req) => {
@@ -146,5 +155,21 @@ export default async function lostBuyboxRoutes(app: FastifyInstance) {
       where workspace_id = ${req.user!.workspaceId} and asin = ${asin}
     `;
     return { ok: true };
+  });
+
+  // Bulk un-ignore (ported from the source app's /ignored/bulk-delete).
+  app.post("/lost-buybox/ignored/bulk-delete", async (req) => {
+    const { asins } = z
+      .object({ asins: z.array(z.string().min(1)).min(1) })
+      .parse(req.body);
+    const list = [
+      ...new Set(asins.map((a) => a.trim().toUpperCase()).filter(Boolean)),
+    ];
+    if (list.length === 0) return { ok: true, removed: 0 };
+    await sql`
+      delete from ignored_asins
+      where workspace_id = ${req.user!.workspaceId} and asin = any(${list})
+    `;
+    return { ok: true, removed: list.length };
   });
 }

@@ -14,6 +14,7 @@ import { logger } from "../logger.js";
 import type { LostBuyboxRow } from "@fbm/shared";
 import { getAmazonProvider } from "./index.js";
 import { analyze, type AnalyzeSummary } from "./buybox.js";
+import { ScanCancelledError, type RunCtl } from "./scanControl.js";
 import type { CompetitiveSummaryItem } from "./types.js";
 
 export interface ScanProgress {
@@ -46,6 +47,7 @@ async function runBatched(
   paceMs: number,
   onProgress: (p: ScanProgress) => void,
   phase: "pricing" | "retry",
+  runCtl?: RunCtl,
 ): Promise<{ responses: CompetitiveSummaryItem[]; asins: string[] }> {
   const amazon = getAmazonProvider();
   const chunks: string[][] = [];
@@ -56,6 +58,7 @@ async function runBatched(
   const allAsins: string[] = [];
 
   for (let i = 0; i < chunks.length; i++) {
+    if (runCtl?.cancel) throw new ScanCancelledError();
     const chunk = chunks[i];
     try {
       const result = await amazon.getCompetitiveSummary(chunk);
@@ -90,12 +93,14 @@ async function runBatched(
 export async function runLostBuyboxScan(
   ignoredAsins: Set<string>,
   onProgress: (p: ScanProgress) => void = () => {},
+  runCtl?: RunCtl,
 ): Promise<ScanResult> {
   const amazon = getAmazonProvider();
   const sellerId = amazon.sellerId;
 
   onProgress({ phase: "report", message: "Requesting listings from Amazon…" });
   const listings = await amazon.getMerchantListings();
+  if (runCtl?.cancel) throw new ScanCancelledError();
 
   const active = listings.filter((l) => !isInactive(l.status));
   const filtered = active.filter(
@@ -142,7 +147,14 @@ export async function runLostBuyboxScan(
   }
 
   // First pass
-  const first = await runBatched(asinList, PACE_MS, onProgress, "pricing");
+  const first = await runBatched(
+    asinList,
+    PACE_MS,
+    onProgress,
+    "pricing",
+    runCtl,
+  );
+  if (runCtl?.cancel) throw new ScanCancelledError();
 
   // Retry errored ASINs once, slower
   const errored: string[] = [];
@@ -165,6 +177,7 @@ export async function runLostBuyboxScan(
       Math.max(PACE_MS * 2, 6_000),
       onProgress,
       "retry",
+      runCtl,
     );
     const retryByAsin = new Map<string, CompetitiveSummaryItem>();
     retry.responses.forEach((r, i) => retryByAsin.set(retry.asins[i], r));

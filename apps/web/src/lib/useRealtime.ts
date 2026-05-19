@@ -37,7 +37,12 @@ export function useRealtime(): void {
             qc.invalidateQueries({ queryKey: ["lost-buybox"] });
             qc.invalidateQueries({ queryKey: ["activity"] });
             qc.invalidateQueries({ queryKey: ["nav-counts"] });
-            if (msg.ok === false) {
+            if (msg.cancelled) {
+              toast.info(
+                "Scan cancelled",
+                "The Buy Box scan was stopped.",
+              );
+            } else if (msg.ok === false) {
               toast.error(
                 "Buy Box scan failed",
                 msg.error || "See the Activity Log for details.",

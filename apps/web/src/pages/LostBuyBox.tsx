@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { LostBuyboxRun, LostBuyboxRow, IgnoredAsin } from "@fbm/shared";
 import { api } from "../lib/api";
@@ -31,6 +31,10 @@ export function LostBuyBox() {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>("losses");
   const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectedIgnored, setSelectedIgnored] = useState<Set<string>>(
+    new Set(),
+  );
 
   const run = useQuery({
     queryKey: ["lost-buybox"],
@@ -74,25 +78,71 @@ export function LostBuyBox() {
       ),
   });
 
+  const cancelScan = useMutation({
+    mutationFn: () =>
+      api.post<{ ok: boolean }>("/lost-buybox/scan/cancel"),
+    onSuccess: (res) =>
+      res.ok
+        ? toast.info(
+            "Cancelling scan…",
+            "It will stop after the current batch finishes.",
+          )
+        : toast.info("Nothing to cancel", "No scan is currently running."),
+    onError: (err) =>
+      toast.error(
+        "Couldn't cancel",
+        err instanceof Error ? err.message : "Please try again.",
+      ),
+  });
+
   const ignoreMut = useMutation({
-    mutationFn: (row: LostBuyboxRow) =>
+    mutationFn: (rowsToIgnore: LostBuyboxRow[]) =>
       api.post("/lost-buybox/ignored", {
-        asins: [row.asin],
-        rows: [row],
+        asins: rowsToIgnore.map((r) => r.asin),
+        rows: rowsToIgnore,
       }),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["lost-buybox"] });
-      toast.success("ASIN ignored", "It won't show up or trigger an alert.");
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const r of vars) next.delete(r.asin);
+        return next;
+      });
+      toast.success(
+        vars.length === 1
+          ? "ASIN ignored"
+          : `${vars.length} ASINs ignored`,
+        "They won't show up or trigger an alert.",
+      );
     },
+    onError: (err) =>
+      toast.error(
+        "Couldn't ignore",
+        err instanceof Error ? err.message : "Please try again.",
+      ),
   });
 
   const unignoreMut = useMutation({
-    mutationFn: (asin: string) =>
-      api.del(`/lost-buybox/ignored/${encodeURIComponent(asin)}`),
-    onSuccess: () => {
+    mutationFn: (asins: string[]) =>
+      api.post("/lost-buybox/ignored/bulk-delete", { asins }),
+    onSuccess: (_data, asins) => {
       qc.invalidateQueries({ queryKey: ["lost-buybox", "ignored"] });
-      toast.success("Removed from ignore list");
+      setSelectedIgnored((prev) => {
+        const next = new Set(prev);
+        for (const a of asins) next.delete(a);
+        return next;
+      });
+      toast.success(
+        asins.length === 1
+          ? "Removed from ignore list"
+          : `${asins.length} removed from ignore list`,
+      );
     },
+    onError: (err) =>
+      toast.error(
+        "Couldn't un-ignore",
+        err instanceof Error ? err.message : "Please try again.",
+      ),
   });
 
   const rows = run.data?.rows ?? [];
@@ -121,6 +171,108 @@ export function LostBuyBox() {
         (r.productName ?? "").toLowerCase().includes(q),
     );
   }, [ignoredItems, search]);
+
+  // Drop selections for ASINs no longer in the report (e.g. after a re-scan
+  // or after they were ignored elsewhere).
+  useEffect(() => {
+    setSelected((prev) => {
+      const valid = new Set(rows.map((r) => r.asin));
+      let changed = false;
+      const next = new Set<string>();
+      for (const a of prev) {
+        if (valid.has(a)) next.add(a);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [rows]);
+
+  const selectedRows = useMemo(
+    () => filteredRows.filter((r) => selected.has(r.asin)),
+    [filteredRows, selected],
+  );
+  const allFilteredSelected =
+    filteredRows.length > 0 && selectedRows.length === filteredRows.length;
+  const someSelected =
+    selectedRows.length > 0 && !allFilteredSelected;
+
+  const headCbRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headCbRef.current) headCbRef.current.indeterminate = someSelected;
+  }, [someSelected]);
+
+  function toggleRow(asin: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(asin)) next.delete(asin);
+      else next.add(asin);
+      return next;
+    });
+  }
+  function toggleAll() {
+    setSelected((prev) => {
+      if (allFilteredSelected) {
+        const next = new Set(prev);
+        for (const r of filteredRows) next.delete(r.asin);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const r of filteredRows) next.add(r.asin);
+      return next;
+    });
+  }
+
+  // --- Ignored tab selection (mirrors the Losses tab) ---
+  useEffect(() => {
+    setSelectedIgnored((prev) => {
+      const valid = new Set(ignoredItems.map((r) => r.asin));
+      let changed = false;
+      const next = new Set<string>();
+      for (const a of prev) {
+        if (valid.has(a)) next.add(a);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [ignoredItems]);
+
+  const selectedIgnoredRows = useMemo(
+    () => filteredIgnored.filter((r) => selectedIgnored.has(r.asin)),
+    [filteredIgnored, selectedIgnored],
+  );
+  const allIgnSelected =
+    filteredIgnored.length > 0 &&
+    selectedIgnoredRows.length === filteredIgnored.length;
+  const someIgnSelected =
+    selectedIgnoredRows.length > 0 && !allIgnSelected;
+
+  const headCbIgnRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headCbIgnRef.current) {
+      headCbIgnRef.current.indeterminate = someIgnSelected;
+    }
+  }, [someIgnSelected]);
+
+  function toggleIgnRow(asin: string) {
+    setSelectedIgnored((prev) => {
+      const next = new Set(prev);
+      if (next.has(asin)) next.delete(asin);
+      else next.add(asin);
+      return next;
+    });
+  }
+  function toggleIgnAll() {
+    setSelectedIgnored((prev) => {
+      if (allIgnSelected) {
+        const next = new Set(prev);
+        for (const r of filteredIgnored) next.delete(r.asin);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const r of filteredIgnored) next.add(r.asin);
+      return next;
+    });
+  }
 
   return (
     <div>
@@ -169,6 +321,14 @@ export function LostBuyBox() {
               ? ` (${progress.processed}/${progress.total})`
               : ""}
           </span>
+          <div style={{ flex: 1 }} />
+          <button
+            className="btn btn-secondary btn-xs"
+            disabled={cancelScan.isPending}
+            onClick={() => cancelScan.mutate()}
+          >
+            {cancelScan.isPending ? "Cancelling…" : "Cancel scan"}
+          </button>
         </div>
       )}
 
@@ -236,6 +396,110 @@ export function LostBuyBox() {
         </button>
       </div>
 
+      {/* Selection / bulk-ignore bar (losses tab) */}
+      {tab === "losses" && filteredRows.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontSize: 13, color: "var(--text-2)" }}>
+            <strong style={{ color: "var(--text)" }}>
+              {filteredRows.length}
+            </strong>{" "}
+            ASIN{filteredRows.length === 1 ? "" : "s"} missed Buy Box
+            {selectedRows.length > 0 && (
+              <>
+                {" · "}
+                <strong style={{ color: "var(--text)" }}>
+                  {selectedRows.length}
+                </strong>{" "}
+                selected
+              </>
+            )}
+          </div>
+          <div style={{ flex: 1 }} />
+          {selectedRows.length > 0 && (
+            <>
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={ignoreMut.isPending}
+                onClick={() => ignoreMut.mutate(selectedRows)}
+              >
+                {ignoreMut.isPending
+                  ? "Ignoring…"
+                  : `Ignore ${selectedRows.length} selected`}
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                disabled={ignoreMut.isPending}
+                onClick={() => setSelected(new Set())}
+              >
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Selection / bulk-unignore bar (ignored tab) */}
+      {tab === "ignored" && filteredIgnored.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontSize: 13, color: "var(--text-2)" }}>
+            <strong style={{ color: "var(--text)" }}>
+              {filteredIgnored.length}
+            </strong>{" "}
+            ignored ASIN{filteredIgnored.length === 1 ? "" : "s"}
+            {selectedIgnoredRows.length > 0 && (
+              <>
+                {" · "}
+                <strong style={{ color: "var(--text)" }}>
+                  {selectedIgnoredRows.length}
+                </strong>{" "}
+                selected
+              </>
+            )}
+          </div>
+          <div style={{ flex: 1 }} />
+          {selectedIgnoredRows.length > 0 && (
+            <>
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={unignoreMut.isPending}
+                onClick={() =>
+                  unignoreMut.mutate(
+                    selectedIgnoredRows.map((r) => r.asin),
+                  )
+                }
+              >
+                {unignoreMut.isPending
+                  ? "Removing…"
+                  : `Un-ignore ${selectedIgnoredRows.length} selected`}
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                disabled={unignoreMut.isPending}
+                onClick={() => setSelectedIgnored(new Set())}
+              >
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Losses */}
       {tab === "losses" &&
         (run.isLoading ? (
@@ -256,6 +520,15 @@ export function LostBuyBox() {
             <table className="tbl tbl-compact">
               <thead>
                 <tr>
+                  <th style={{ width: 34, textAlign: "center" }}>
+                    <input
+                      ref={headCbRef}
+                      type="checkbox"
+                      aria-label="Select all"
+                      checked={allFilteredSelected}
+                      onChange={toggleAll}
+                    />
+                  </th>
                   <th>Product</th>
                   <th style={{ textAlign: "right" }}>My Price</th>
                   <th style={{ textAlign: "right" }}>Buy Box</th>
@@ -265,8 +538,23 @@ export function LostBuyBox() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((r) => (
-                  <tr key={r.asin}>
+                {filteredRows.map((r) => {
+                  const isSel = selected.has(r.asin);
+                  return (
+                  <tr
+                    key={r.asin}
+                    style={
+                      isSel ? { background: "var(--surface-2)" } : undefined
+                    }
+                  >
+                    <td style={{ textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${r.asin}`}
+                        checked={isSel}
+                        onChange={() => toggleRow(r.asin)}
+                      />
+                    </td>
                     <td>
                       <div style={{ minWidth: 0, maxWidth: 360 }}>
                         <div className="lbb-title">
@@ -323,13 +611,14 @@ export function LostBuyBox() {
                       <button
                         className="btn btn-secondary btn-xs"
                         disabled={ignoreMut.isPending}
-                        onClick={() => ignoreMut.mutate(r)}
+                        onClick={() => ignoreMut.mutate([r])}
                       >
                         Ignore
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -351,6 +640,15 @@ export function LostBuyBox() {
             <table className="tbl tbl-compact">
               <thead>
                 <tr>
+                  <th style={{ width: 34, textAlign: "center" }}>
+                    <input
+                      ref={headCbIgnRef}
+                      type="checkbox"
+                      aria-label="Select all"
+                      checked={allIgnSelected}
+                      onChange={toggleIgnAll}
+                    />
+                  </th>
                   <th>Product</th>
                   <th style={{ textAlign: "right" }}>My Price</th>
                   <th style={{ textAlign: "right" }}>Buy Box</th>
@@ -359,8 +657,23 @@ export function LostBuyBox() {
                 </tr>
               </thead>
               <tbody>
-                {filteredIgnored.map((r) => (
-                  <tr key={r.asin}>
+                {filteredIgnored.map((r) => {
+                  const isSel = selectedIgnored.has(r.asin);
+                  return (
+                  <tr
+                    key={r.asin}
+                    style={
+                      isSel ? { background: "var(--surface-2)" } : undefined
+                    }
+                  >
+                    <td style={{ textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${r.asin}`}
+                        checked={isSel}
+                        onChange={() => toggleIgnRow(r.asin)}
+                      />
+                    </td>
                     <td>
                       <div style={{ minWidth: 0, maxWidth: 360 }}>
                         <div className="lbb-title">
@@ -410,13 +723,14 @@ export function LostBuyBox() {
                       <button
                         className="btn btn-secondary btn-xs"
                         disabled={unignoreMut.isPending}
-                        onClick={() => unignoreMut.mutate(r.asin)}
+                        onClick={() => unignoreMut.mutate([r.asin])}
                       >
                         Un-ignore
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
