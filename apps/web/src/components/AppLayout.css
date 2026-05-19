@@ -167,3 +167,62 @@
 }
 .pulse-dot { animation: pulse 1.5s infinite; }
 
+
+/* ============= Responsive ============= */
+
+/* Search box width (was an inline style; class-driven so media queries can override) */
+.topbar-search .input { width: 320px; }
+
+/* Hamburger — hidden on desktop, shown only when the sidebar collapses.
+   Scoped to .topbar so it outranks the generic `.btn { display:inline-flex }`
+   in app.css (equal class specificity would otherwise leak it onto desktop). */
+.topbar .nav-toggle { display: none; flex-shrink: 0; }
+
+/* Dim backdrop behind the off-canvas sidebar */
+.nav-overlay {
+  position: fixed; inset: 0;
+  background: rgba(11, 13, 18, 0.45);
+  z-index: 55;
+  display: none;
+  animation: fadeIn .15s ease;
+}
+
+/* Prevent wide tables/grids from blowing out the 1fr main column */
+.app-shell > main { min-width: 0; }
+
+/* Tablet / laptop — collapse the sidebar into an off-canvas drawer */
+@media (max-width: 1024px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar {
+    position: fixed; top: 0; left: 0;
+    width: 252px; height: 100vh;
+    z-index: 60;
+    transform: translateX(-100%);
+    transition: transform .22s ease;
+    box-shadow: var(--shadow-xl);
+    overflow-y: auto;
+  }
+  .sidebar.open { transform: translateX(0); }
+  .nav-overlay.show { display: block; }
+  .topbar .nav-toggle { display: inline-flex; }
+  .topbar { padding: 12px 18px; }
+}
+
+/* Tablet portrait — tighten topbar, shrink search */
+@media (max-width: 768px) {
+  .topbar { padding: 10px 14px; gap: 10px; }
+  .topbar-search { flex: 1; min-width: 0; }
+  .topbar-search .input { width: 100%; }
+  .kbd { display: none; }
+  .page-title { font-size: 16px; }
+  .notif-panel { width: min(360px, calc(100vw - 28px)); }
+}
+
+/* Phones — drop the placeholder search, keep actions reachable */
+@media (max-width: 560px) {
+  .topbar { padding: 9px 12px; }
+  .topbar-search { display: none; }
+  .breadcrumb { display: none; }
+  .page-title { font-size: 15px; }
+}
+

@@ -240,3 +240,16 @@
 }
 
 
+/* ============= Responsive ============= */
+@media (max-width: 768px) {
+  .inv-product-head { padding: 14px 16px; }
+  .inv-product-body { padding: 4px 14px 16px; }
+}
+@media (max-width: 560px) {
+  .inv-mp-grid { grid-template-columns: 1fr; }
+  .inv-product-head { flex-wrap: wrap; gap: 10px; }
+  .inv-product-right { gap: 12px; }
+  .inv-shipment { flex-wrap: wrap; }
+}
+
+

@@ -57,3 +57,8 @@
   color: var(--brand-600);
   font-weight: 600;
 }
+
+@media (max-width: 480px) {
+  .auth-shell { padding: 16px; }
+  .auth-card { padding: 24px 20px; }
+}

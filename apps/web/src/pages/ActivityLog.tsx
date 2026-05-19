@@ -178,14 +178,19 @@ export function ActivityLog() {
                             <div className="act-product">{a.summary}</div>
                           </td>
                           <td>
-                            <span className="act-mp-chip">
-                              {a.entityType}
+                            <div className="act-entity">
+                              <span className="act-entity-type">
+                                {a.entityType}
+                              </span>
                               {a.entityId ? (
-                                <span className="act-product-sku">
+                                <span
+                                  className="act-entity-id"
+                                  title={a.entityId}
+                                >
                                   {a.entityId}
                                 </span>
                               ) : null}
-                            </span>
+                            </div>
                           </td>
                         </tr>
                       );

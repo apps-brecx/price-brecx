@@ -247,3 +247,19 @@
 }
 
 
+/* ============= Responsive ============= */
+@media (max-width: 1024px) {
+  .dash-two-col { grid-template-columns: 1fr; }
+  .dash-mp-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 768px) {
+  .dash-mp-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+}
+@media (max-width: 560px) {
+  .dash-mp-grid { grid-template-columns: 1fr; }
+  .dash-schedule { padding: 12px 14px; gap: 10px; }
+  .dash-activity-table thead th,
+  .dash-activity-table tbody td { padding: 10px 12px; }
+}
+
+

@@ -132,7 +132,7 @@ export function Products() {
           }
         />
       ) : (
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        <div className="card card-table-wrap" style={{ padding: 0 }}>
           <table className="products-table">
             <thead>
               <tr>

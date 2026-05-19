@@ -148,6 +148,7 @@ export function AppLayout() {
 
   const [notifOpen, setNotifOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const topbarRef = useRef<HTMLDivElement>(null);
 
   const { data: counts } = useQuery({
@@ -175,10 +176,11 @@ export function AppLayout() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  // Close popovers on navigation.
+  // Close popovers and the mobile nav drawer on navigation.
   useEffect(() => {
     setNotifOpen(false);
     setHelpOpen(false);
+    setNavOpen(false);
   }, [pathname]);
 
   const [title, crumb] = TITLES[pathname] ?? ["Priceobo", "Priceobo"];
@@ -202,7 +204,12 @@ export function AppLayout() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <div
+        className={"nav-overlay" + (navOpen ? " show" : "")}
+        onClick={() => setNavOpen(false)}
+        aria-hidden="true"
+      />
+      <aside className={"sidebar" + (navOpen ? " open" : "")}>
         <div className="logo-wrap">
           <div className="logo-mark">
             <Logo size={30} />
@@ -349,6 +356,18 @@ export function AppLayout() {
 
       <main>
         <div className="topbar" ref={topbarRef}>
+          <button
+            className="btn btn-secondary btn-icon nav-toggle"
+            title="Menu"
+            aria-label="Toggle navigation"
+            onClick={() => setNavOpen((v) => !v)}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
           <div className="page-title-wrap">
             <div className="breadcrumb">
               <span>{crumb}</span>
@@ -356,12 +375,12 @@ export function AppLayout() {
             <div className="page-title">{title}</div>
           </div>
 
-          <div className="input-wrap">
+          <div className="input-wrap topbar-search">
             <svg className="input-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8" />
               <path d="m21 21-4.3-4.3" />
             </svg>
-            <input className="input" placeholder="Search ASIN, SKU, title…" style={{ width: 320 }} />
+            <input className="input" placeholder="Search ASIN, SKU, title…" />
             <span className="kbd">⌘K</span>
           </div>
 

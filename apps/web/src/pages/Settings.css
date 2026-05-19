@@ -117,7 +117,7 @@
 
 .notif-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
   gap: 16px;
 }
 
@@ -869,6 +869,26 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+
+/* ============= Responsive ============= */
+@media (max-width: 768px) {
+  /* Tab rows scroll instead of overflowing the viewport */
+  .notif-sub-tabs {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+  .notif-sub-tab { white-space: nowrap; flex-shrink: 0; }
+  .notif-inner-tabs {
+    gap: 16px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+  .notif-inner-tab { white-space: nowrap; flex-shrink: 0; }
+  .notif-section-head { flex-wrap: wrap; padding: 16px; }
+  .notif-section-sub { padding-left: 0; }
 }
 
 

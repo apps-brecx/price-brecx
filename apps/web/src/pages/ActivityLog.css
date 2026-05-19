@@ -57,6 +57,29 @@
   font-size: 12px;
   font-weight: 550;
 }
+
+/* Entity cell — stacked type label + truncated id (UUIDs are long; never wrap) */
+.act-entity {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.act-entity-type {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: capitalize;
+}
+.act-entity-id {
+  font-size: 11px;
+  color: var(--text-4);
+  font-family: var(--font-mono);
+  max-width: 118px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .act-mp-dot {
   width: 8px; height: 8px;
   border-radius: 2px;

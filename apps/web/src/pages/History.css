@@ -261,3 +261,15 @@
 }
 
 
+/* ============= Responsive ============= */
+@media (max-width: 768px) {
+  .hist-expand-content { padding: 14px 16px 16px 24px; }
+  .hist-expand-group { grid-template-columns: 1fr; gap: 12px; }
+  .hist-group-meta { justify-content: flex-start; }
+}
+@media (max-width: 560px) {
+  .hist-day-grid { grid-template-columns: repeat(2, 1fr); }
+  .hist-table tbody td { padding: 12px 8px; }
+}
+
+

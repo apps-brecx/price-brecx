@@ -10,7 +10,14 @@
       "Bash(echo \"EXIT:$?\")",
       "Bash(npx vite *)",
       "Bash(git log *)",
-      "PowerShell(pnpm *)"
+      "PowerShell(pnpm *)",
+      "Bash(sed -n '128,137p' Products.tsx)",
+      "Bash(sed -n '400,409p' Dashboard.tsx)",
+      "Bash(sed -n '205,214p' PricingV2.tsx)",
+      "Bash(sed -n '124,140p' ActivityLog.tsx)",
+      "Bash(sed -n '152,168p' History.tsx)",
+      "Bash(echo \"TSC_EXIT=$?\")",
+      "Bash(echo \"BUILD_EXIT=$?\")"
     ]
   }
 }

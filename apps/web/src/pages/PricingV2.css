@@ -435,3 +435,16 @@
 .pv2-extra-card-foot .comments svg { width: 10px; height: 10px; }
 
 
+/* ============= Responsive ============= */
+/* The pricing grid has many fixed columns — let it scroll horizontally
+   once the viewport can no longer hold its natural width. */
+@media (max-width: 1024px) {
+  .pv2-table { overflow-x: auto; }
+  .pv2-header,
+  .pv2-rows { min-width: 1180px; }
+}
+@media (max-width: 768px) {
+  .pv2-extra-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+
+

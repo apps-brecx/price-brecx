@@ -396,7 +396,7 @@ export function Dashboard() {
           View full log →
         </span>
       </div>
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="card card-table-wrap" style={{ padding: 0 }}>
         {recentActivity.length === 0 ? (
           <div className="card-body">
             <EmptyState

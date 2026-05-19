@@ -165,7 +165,7 @@ export function BuyBox() {
               message="You currently hold the Buy Box. Losses will be reported here."
             />
           ) : (
-            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            <div className="card card-table-wrap" style={{ padding: 0 }}>
               <table className="tbl tbl-compact">
                 <thead>
                   <tr>
