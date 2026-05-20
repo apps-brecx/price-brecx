@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   useQuery,
   useMutation,
@@ -22,6 +22,19 @@ import { BarcodeScanner } from "../components/BarcodeScanner";
 import { useToast } from "../components/Toast";
 
 const PAGE_SIZE = 25;
+
+/** Amazon fulfillment-channel → display badge label.
+ *  "DEFAULT" = merchant-fulfilled (FBM); anything else (AMAZON_NA, AMAZON_EU…)
+ *  is Amazon-fulfilled (FBA). null = channel not synced yet. */
+function fbaLabel(fc: string | null): "FBA" | "FBM" | null {
+  if (!fc) return null;
+  return fc === "DEFAULT" ? "FBM" : "FBA";
+}
+
+/** Pull a period's units from a SKU's salesMetrics array (0 if absent). */
+function unitsFor(s: Sku, period: "1d" | "7d" | "15d" | "30d"): number {
+  return s.salesMetrics?.find((m) => m.period === period)?.units ?? 0;
+}
 
 const emptyDraft: SkuCreateInput = {
   sku: "",
@@ -69,6 +82,11 @@ export function SKUs() {
   const [createOpen, setCreateOpen] = useState(false);
   const [draft, setDraft] = useState<SkuCreateInput>(emptyDraft);
   const [scheduleFor, setScheduleFor] = useState<Sku | null>(null);
+  type Tab = "all" | "active" | "inactive" | "favorites" | "scheduled";
+  const [tab, setTab] = useState<Tab>("all");
+
+  // Reset to page 1 when the tab changes.
+  useEffect(() => setPage(1), [tab]);
 
   // Debounce search → resets to page 1
   useEffect(() => {
@@ -79,13 +97,40 @@ export function SKUs() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
+  const tabParams = useMemo(() => {
+    switch (tab) {
+      case "active":
+        return { status: "active" };
+      case "inactive":
+        return { status: "inactive" };
+      case "favorites":
+        return { favorite: "true" };
+      case "scheduled":
+        return { scheduled: "true" };
+      default:
+        return {};
+    }
+  }, [tab]);
+
   const query = useQuery({
-    queryKey: ["skus", { search, page }],
+    queryKey: ["skus", { search, page, tab }],
     queryFn: () =>
       api.get<Paginated<Sku>>(
-        `/skus${qs({ search, page, pageSize: PAGE_SIZE })}`,
+        `/skus${qs({ search, page, pageSize: PAGE_SIZE, ...tabParams })}`,
       ),
     placeholderData: keepPreviousData,
+  });
+
+  const statsQ = useQuery({
+    queryKey: ["skus", "stats"],
+    queryFn: () =>
+      api.get<{
+        activeSkus: number;
+        scheduledUpdates: number;
+        totalChannelStock: number;
+        sales30d: number;
+      }>("/skus/stats"),
+    staleTime: 30_000,
   });
 
   const createMut = useMutation({
@@ -150,8 +195,98 @@ export function SKUs() {
   const fromN = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const toN = Math.min(page * PAGE_SIZE, total);
 
+  const stats = statsQ.data;
+  const fmtMoney = (n: number) =>
+    `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
+  function exportCsv() {
+    const items = query.data?.items ?? [];
+    if (items.length === 0) return;
+    const header = [
+      "SKU",
+      "ASIN",
+      "Title",
+      "Status",
+      "Channel",
+      "FBA/FBM",
+      "Price",
+      "Channel Stock",
+      "Sales (30d)",
+    ];
+    const csvCell = (v: string | number | null) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [
+      header.join(","),
+      ...items.map((s) =>
+        [
+          s.sku,
+          s.asin ?? "",
+          s.title,
+          s.status,
+          s.channel,
+          fbaLabel(s.fulfillmentChannel) ?? "",
+          s.price,
+          s.stock,
+          unitsFor(s, "30d"),
+        ]
+          .map(csvCell)
+          .join(","),
+      ),
+    ];
+    const blob = new Blob([lines.join("\r\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `skus-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div>
+      {/* Stat strip — Active SKUs / Scheduled Updates / Total Channel Stock / Sales (30D) */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: 14,
+          marginBottom: 18,
+        }}
+      >
+        <div className="stat-card">
+          <div className="stat-label">Active SKUs</div>
+          <div className="stat-value">
+            {stats ? num(stats.activeSkus) : "—"}
+          </div>
+          <div className="stat-trend">all live listings</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Scheduled Updates</div>
+          <div className="stat-value">
+            {stats ? num(stats.scheduledUpdates) : "—"}
+          </div>
+          <div className="stat-trend">price schedules pending</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Total Channel Stock</div>
+          <div className="stat-value">
+            {stats ? num(stats.totalChannelStock) : "—"}
+          </div>
+          <div className="stat-trend">units across all SKUs</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Sales (30D)</div>
+          <div className="stat-value">
+            {stats ? fmtMoney(stats.sales30d) : "—"}
+          </div>
+          <div className="stat-trend up">revenue · last 30 days</div>
+        </div>
+      </div>
+
       {/* Top toolbar — search left, action buttons right */}
       <div
         style={{
@@ -223,6 +358,61 @@ export function SKUs() {
         </button>
 
         <button
+          className="btn btn-secondary btn-sm"
+          title="Download visible SKUs as CSV"
+          disabled={!query.data?.items?.length}
+          onClick={exportCsv}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Export
+        </button>
+
+        <button
+          className="btn btn-secondary btn-sm"
+          title="Pending price schedules"
+          onClick={() => setTab("scheduled")}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <path d="M16 2v4M8 2v4M3 10h18" />
+          </svg>
+          Schedule Price
+          {stats?.scheduledUpdates ? (
+            <span
+              style={{
+                marginLeft: 6,
+                background: "var(--brand-600)",
+                color: "#fff",
+                borderRadius: 4,
+                padding: "1px 6px",
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              {stats.scheduledUpdates}
+            </span>
+          ) : null}
+        </button>
+
+        <button
           className="btn btn-primary btn-sm"
           onClick={() => setCreateOpen(true)}
         >
@@ -239,6 +429,44 @@ export function SKUs() {
           </svg>
           Add SKU
         </button>
+      </div>
+
+      {/* Filter tabs — All / Active / Inactive / Favorites / Scheduled */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 14,
+          flexWrap: "wrap",
+        }}
+      >
+        {(
+          [
+            ["all", "All", total],
+            ["active", "Active", stats?.activeSkus],
+            [
+              "inactive",
+              "Inactive",
+              stats != null
+                ? Math.max(0, total - (stats.activeSkus ?? 0))
+                : undefined,
+            ],
+            ["favorites", "Favorites", undefined],
+            ["scheduled", "Scheduled", stats?.scheduledUpdates],
+          ] as const
+        ).map(([key, label, count]) => (
+          <div
+            key={key}
+            className={"filter-chip" + (tab === key ? " active" : "")}
+            onClick={() => setTab(key as Tab)}
+          >
+            {label}
+            {typeof count === "number" && (
+              <span className="count">{num(count)}</span>
+            )}
+          </div>
+        ))}
       </div>
 
       {/* Result count row */}
@@ -289,12 +517,12 @@ export function SKUs() {
                   <th style={{ width: 62 }}>Image</th>
                   <th>Product details</th>
                   <th style={{ width: 90 }}>Price</th>
-                  <th style={{ width: 90 }}>Channel</th>
+                  <th style={{ width: 90, textAlign: "center" }}>FBA/FBM</th>
                   <th style={{ width: 120 }}>Tags</th>
                   <th style={{ width: 120, textAlign: "right" }}>
                     Channel Stock
                   </th>
-                  <th style={{ width: 80, textAlign: "right" }}>30d Sales</th>
+                  <th style={{ width: 120, textAlign: "right" }}>Sale</th>
                   <th style={{ width: 110, textAlign: "center" }}>
                     Update Price
                   </th>
@@ -380,10 +608,26 @@ export function SKUs() {
                         </div>
                       )}
                     </td>
-                    <td>
-                      <span className="badge badge-neutral">
-                        {CHANNEL_LABELS[s.channel]}
-                      </span>
+                    <td style={{ textAlign: "center" }}>
+                      {fbaLabel(s.fulfillmentChannel) ? (
+                        <span
+                          className="badge"
+                          style={{
+                            background:
+                              fbaLabel(s.fulfillmentChannel) === "FBA"
+                                ? "var(--info-bg)"
+                                : "var(--warning-bg)",
+                            color:
+                              fbaLabel(s.fulfillmentChannel) === "FBA"
+                                ? "var(--info-fg)"
+                                : "var(--warning-fg)",
+                          }}
+                        >
+                          {fbaLabel(s.fulfillmentChannel)}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-4)" }}>—</span>
+                      )}
                     </td>
                     <td>
                       <Tags tags={s.tags} />
@@ -407,18 +651,39 @@ export function SKUs() {
                         fontVariantNumeric: "tabular-nums",
                       }}
                     >
-                      {s.sales30d > 0 ? (
-                        <span
-                          style={{
-                            color: "var(--success-fg)",
-                            fontWeight: 600,
-                          }}
-                        >
-                          {num(s.sales30d)}
-                        </span>
-                      ) : (
-                        <span style={{ color: "var(--text-4)" }}>0</span>
-                      )}
+                      {(() => {
+                        const u30 = unitsFor(s, "30d");
+                        const u1 = unitsFor(s, "1d");
+                        const u7 = unitsFor(s, "7d");
+                        const u15 = unitsFor(s, "15d");
+                        return (
+                          <>
+                            <div
+                              style={{
+                                color:
+                                  u30 > 0
+                                    ? "var(--success-fg)"
+                                    : "var(--text-4)",
+                                fontWeight: 600,
+                                fontSize: 13,
+                              }}
+                              title="Units sold in last 30 days"
+                            >
+                              {num(u30)}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 10.5,
+                                color: "var(--text-3)",
+                                marginTop: 2,
+                                letterSpacing: 0.1,
+                              }}
+                            >
+                              1D {num(u1)} · 7D {num(u7)} · 15D {num(u15)}
+                            </div>
+                          </>
+                        );
+                      })()}
                     </td>
                     <td style={{ textAlign: "center" }}>
                       <button

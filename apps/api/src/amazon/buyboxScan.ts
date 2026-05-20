@@ -216,6 +216,7 @@ export async function runLostBuyboxScan(
         sellerSku: l?.sku ?? skus[0] ?? null,
         skus,
         productName: l?.title ?? null,
+        imageUrl: l?.imageUrl ?? null,
         myPrice: r.myPrice,
         buyboxPrice: r.buyboxPrice,
         buyboxSellerId: r.buyboxSellerId,

@@ -49,6 +49,17 @@ export interface CompetitiveSummaryResponse {
   responses: CompetitiveSummaryItem[];
 }
 
+/** One row of the All Orders flat-file report (fields we use for sales aggregation). */
+export interface OrderRow {
+  amazonOrderId: string;
+  purchaseDate: Date;
+  sku: string;
+  asin: string | null;
+  quantity: number;
+  itemPrice: number;
+  itemStatus: string;
+}
+
 export interface AmazonProvider {
   readonly mode: "live" | "stub";
   /** The configured seller id, or null in stub mode. Needed by the buy-box
@@ -68,6 +79,17 @@ export interface AmazonProvider {
   /** Product Pricing API v2022-05-01 getCompetitiveSummary, batched. Caller
    *  must pass ≤20 ASINs per call (the SP-API hard cap). */
   getCompetitiveSummary(asins: string[]): Promise<CompetitiveSummaryResponse>;
+  /** All-orders flat-file report for the last `daysBack` days. Drives the
+   *  per-SKU sales-metrics aggregator (1D / 7D / 15D / 30D buckets). */
+  getOrdersReport(daysBack: number): Promise<OrderRow[]>;
+  /** Listings Items API v2021-08-01 GET by SKU with `includedData=summaries`.
+   *  Returns the main product image + FBA barcode + display title. The legacy
+   *  app called this per SKU via its `api.priceobo.com/image/{sku}` wrapper. */
+  getListingSummary(sku: string): Promise<{
+    imageUrl: string | null;
+    fnSku: string | null;
+    itemName: string | null;
+  }>;
 }
 
 export interface FbaQty {

@@ -3,7 +3,14 @@ import { env, appUrl } from "./env.js";
 import { logger } from "./logger.js";
 import { sql, jsonb } from "./db.js";
 import { getAmazonProvider } from "./amazon/index.js";
-import { syncAmazonToSkus } from "./amazon/sync.js";
+import {
+  syncAmazonToSkus,
+  syncListings,
+  syncImages,
+  syncFbaStock,
+  syncSales,
+  type StageResult,
+} from "./amazon/sync.js";
 import { runLostBuyboxScan } from "./amazon/buyboxScan.js";
 import {
   beginScan,
@@ -49,12 +56,28 @@ export const LOST_BUYBOX_CRON_QUEUE = "lost-buybox-cron";
 /** Every 15 min: sends the Buy Box loss digest at each workspace's chosen time. */
 export const BUYBOX_ALERT_DIGEST_QUEUE = "buybox-alert-digest";
 
+/* ----- Legacy-style 4-stage daily SKUs sync (Asia/Dhaka timings) ----- */
+export const LISTINGS_SYNC_QUEUE = "listings-sync";          // per-workspace stage worker
+export const IMAGE_SYNC_QUEUE = "image-sync";
+export const FBA_SYNC_QUEUE = "fba-sync";
+export const SALES_SYNC_QUEUE = "sales-sync";
+/** Cron fan-outs (no payload): 8:00 / 8:30 / 11:00 / 11:30 Asia/Dhaka. */
+export const LISTINGS_SYNC_CRON_QUEUE = "listings-sync-cron";
+export const IMAGE_SYNC_CRON_QUEUE = "image-sync-cron";
+export const FBA_SYNC_CRON_QUEUE = "fba-sync-cron";
+export const SALES_SYNC_CRON_QUEUE = "sales-sync-cron";
+
 export interface SyncAmazonJob {
   workspaceId: string;
   actor: string;
 }
 
 export interface LostBuyboxScanJob {
+  workspaceId: string;
+  actor: string;
+}
+
+export interface SkuStageJob {
   workspaceId: string;
   actor: string;
 }
@@ -76,7 +99,11 @@ export function getBoss(): PgBoss {
   return boss;
 }
 
+/** Bumped on every behaviour change so we can spot stale processes in logs. */
+const JOBS_VERSION = "v3-staged-sync-banners-2026-05-20";
+
 export async function startJobs(): Promise<void> {
+  logger.info(`🔧 jobs.ts loaded — ${JOBS_VERSION}`);
   boss = new PgBoss({
     connectionString: env.DATABASE_URL,
     ssl: env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined,
@@ -130,14 +157,50 @@ export async function startJobs(): Promise<void> {
   await boss.work<SyncAmazonJob>(SYNC_AMAZON_QUEUE, async ([job]) => {
     const { workspaceId, actor } = job.data;
     try {
-      const res = await syncAmazonToSkus(workspaceId);
+      const res = await syncAmazonToSkus(workspaceId, async (o) => {
+        // Per-stage broadcast + activity so failures aren't silent.
+        if (o.ok) {
+          await recordActivity({
+            workspaceId,
+            actor,
+            action: "updated",
+            entityType: "sku",
+            entityId: null,
+            summary: `${o.stage} sync — ${o.affected} rows (${o.mode})`,
+            meta: { stage: o.stage, affected: o.affected, mode: o.mode },
+          });
+          broadcast(workspaceId, {
+            type: "skus_synced",
+            ok: true,
+            stage: o.stage,
+            count: o.affected,
+            mode: o.mode,
+          });
+        } else {
+          await recordActivity({
+            workspaceId,
+            actor,
+            action: "updated",
+            entityType: "sku",
+            entityId: null,
+            summary: `${o.stage} sync failed — ${o.error}`,
+            meta: { stage: o.stage, error: o.error },
+          });
+          broadcast(workspaceId, {
+            type: "skus_synced",
+            ok: false,
+            stage: o.stage,
+            error: o.error,
+          });
+        }
+      });
       await recordActivity({
         workspaceId,
         actor,
         action: "updated",
         entityType: "sku",
         entityId: null,
-        summary: `Amazon sync — ${res.upserted} SKUs (${res.mode})`,
+        summary: `Amazon sync done — ${res.upserted} SKUs (${res.mode})`,
         meta: { upserted: res.upserted, mode: res.mode },
       });
       broadcast(workspaceId, {
@@ -189,6 +252,29 @@ export async function startJobs(): Promise<void> {
           ctl,
         );
 
+        // Enrich rows with image_url from the skus table — the merchant
+        // listings report often returns blank image-url; our skus table is
+        // backfilled via the Listings Items API (image-sync stage).
+        if (result.rows.length > 0) {
+          const asins = [...new Set(result.rows.map((r) => r.asin))];
+          const imgRows = await sql<
+            { asin: string; image_url: string | null }[]
+          >`
+            select asin, image_url from skus
+            where workspace_id = ${workspaceId}
+              and asin = any(${asins})
+              and image_url is not null
+          `;
+          const imgByAsin = new Map(
+            imgRows.map((r) => [r.asin, r.image_url] as const),
+          );
+          for (const row of result.rows) {
+            if (!row.imageUrl) {
+              row.imageUrl = imgByAsin.get(row.asin) ?? null;
+            }
+          }
+        }
+
         const marketplaceId = env.MARKETPLACE_ID ?? null;
         await sql`
           insert into lost_buybox_runs
@@ -230,8 +316,29 @@ export async function startJobs(): Promise<void> {
               "buybox_seller_id",
             )}
           `;
-          // Email is no longer sent here — it's a scheduled digest driven by
-          // the workspace's Buy Box Alert settings (BUYBOX_ALERT_DIGEST_QUEUE).
+          // Immediate email to the person who ran the scan (manual click).
+          // Hourly cron uses actor="system" → skipped here; daily digest
+          // (BUYBOX_ALERT_DIGEST_QUEUE) covers scheduled recipients.
+          if (actor.includes("@")) {
+            await sendMail({
+              to: actor,
+              subject: `[Buy Box] ${result.rows.length} ASIN${
+                result.rows.length === 1 ? "" : "s"
+              } lost the Buy Box`,
+              html: buyBoxLossEmailHtml({
+                rows: result.rows,
+                marketplaceId,
+                reportUrl: `${appUrl}/buybox`,
+              }),
+              text: buyBoxLossEmailText({
+                rows: result.rows,
+                marketplaceId,
+                reportUrl: `${appUrl}/buybox`,
+              }),
+            }).catch((err) =>
+              logger.error({ err }, "Buy Box loss email failed"),
+            );
+          }
         }
 
         const amazon = getAmazonProvider();
@@ -374,6 +481,92 @@ export async function startJobs(): Promise<void> {
     }
   });
   await boss.schedule(BUYBOX_ALERT_DIGEST_QUEUE, "*/15 * * * *");
+
+  // ---- Legacy-style 4-stage daily SKUs sync (Asia/Dhaka) ----
+  //   8:00  listings (merchant listings report → title/asin/price/qty)
+  //   8:30  images   (no-op for now — report already carries image-url)
+  //  11:00  FBA      (FBA inventory → fulfillable + pending + fn_sku)
+  //  11:30  sales    (all-orders report → 1D/7D/15D/30D salesMetrics)
+  const stages: Array<{
+    queue: string;
+    cronQueue: string;
+    cron: string;
+    label: string;
+    fn: (wsId: string) => Promise<StageResult>;
+  }> = [
+    { queue: LISTINGS_SYNC_QUEUE, cronQueue: LISTINGS_SYNC_CRON_QUEUE,
+      cron: "0 8 * * *",  label: "Listings sync", fn: syncListings },
+    { queue: IMAGE_SYNC_QUEUE,    cronQueue: IMAGE_SYNC_CRON_QUEUE,
+      cron: "30 8 * * *", label: "Image sync",    fn: syncImages },
+    { queue: FBA_SYNC_QUEUE,      cronQueue: FBA_SYNC_CRON_QUEUE,
+      cron: "0 11 * * *", label: "FBA stock sync", fn: syncFbaStock },
+    { queue: SALES_SYNC_QUEUE,    cronQueue: SALES_SYNC_CRON_QUEUE,
+      cron: "30 11 * * *", label: "Sales sync",   fn: syncSales },
+  ];
+
+  for (const s of stages) {
+    await boss.createQueue(s.queue);
+    await boss.work<SkuStageJob>(s.queue, async ([job]) => {
+      const { workspaceId, actor } = job.data;
+      try {
+        const result = await s.fn(workspaceId);
+        await recordActivity({
+          workspaceId,
+          actor,
+          action: "updated",
+          entityType: "sku",
+          entityId: null,
+          summary: `${s.label} — ${result.affected} rows (${result.mode})`,
+          meta: {
+            stage: result.stage,
+            affected: result.affected,
+            mode: result.mode,
+          },
+        });
+        broadcast(workspaceId, {
+          type: "skus_synced",
+          ok: true,
+          stage: result.stage,
+          count: result.affected,
+          mode: result.mode,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error({ err, workspaceId }, `${s.label} job failed`);
+        await recordActivity({
+          workspaceId,
+          actor,
+          action: "updated",
+          entityType: "sku",
+          entityId: null,
+          summary: `${s.label} failed — ${msg}`,
+          meta: { error: msg },
+        });
+        broadcast(workspaceId, {
+          type: "skus_synced",
+          ok: false,
+          error: msg,
+        });
+      }
+    });
+
+    // Per-cron fan-out: enqueue one stage job per workspace.
+    await boss.createQueue(s.cronQueue);
+    await boss.work(s.cronQueue, async () => {
+      const wss = await sql<{ id: string }[]>`select id from workspaces`;
+      for (const w of wss) {
+        await getBoss().send(s.queue, {
+          workspaceId: w.id,
+          actor: "system",
+        } satisfies SkuStageJob);
+      }
+      logger.info(
+        { stage: s.label, workspaces: wss.length },
+        "SKU stage cron fanned out",
+      );
+    });
+    await boss.schedule(s.cronQueue, s.cron, undefined, { tz: "Asia/Dhaka" });
+  }
 
   logger.info("pg-boss started");
 }

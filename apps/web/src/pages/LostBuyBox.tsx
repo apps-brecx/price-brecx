@@ -58,6 +58,24 @@ const ExtLinkIcon = () => (
   </svg>
 );
 
+const FALLBACK_IMG =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#f59e0b"/></svg>',
+  );
+
+function ProductImg({ src }: { src: string | null }) {
+  const [errored, setErrored] = useState(false);
+  return (
+    <img
+      className="product-img"
+      src={!src || errored ? FALLBACK_IMG : src}
+      alt=""
+      onError={() => setErrored(true)}
+    />
+  );
+}
+
 /** CSV-escape a cell (quote when it contains a comma/quote/newline). */
 function csvCell(v: string | number | null): string {
   const s = v == null ? "" : String(v);
@@ -740,6 +758,7 @@ export function LostBuyBox() {
                       onChange={toggleAll}
                     />
                   </th>
+                  <th style={{ width: 62 }}>Image</th>
                   <th>Product</th>
                   <th style={{ textAlign: "right" }}>My Price</th>
                   <th style={{ textAlign: "right" }}>Buy Box</th>
@@ -765,6 +784,9 @@ export function LostBuyBox() {
                         checked={isSel}
                         onChange={() => toggleRow(r.asin)}
                       />
+                    </td>
+                    <td>
+                      <ProductImg src={r.imageUrl ?? null} />
                     </td>
                     <ProductCell
                       asin={r.asin}
@@ -846,6 +868,7 @@ export function LostBuyBox() {
                       onChange={toggleIgnAll}
                     />
                   </th>
+                  <th style={{ width: 62 }}>Image</th>
                   <th>Product</th>
                   <th style={{ textAlign: "right" }}>My Price</th>
                   <th style={{ textAlign: "right" }}>Buy Box</th>
@@ -870,6 +893,9 @@ export function LostBuyBox() {
                         checked={isSel}
                         onChange={() => toggleIgnRow(r.asin)}
                       />
+                    </td>
+                    <td>
+                      <ProductImg src={r.imageUrl ?? null} />
                     </td>
                     <ProductCell
                       asin={r.asin}

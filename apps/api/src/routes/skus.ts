@@ -12,13 +12,17 @@ const listQuery = z.object({
   status: z.string().optional(),
   channel: z.string().optional(),
   favorite: z.coerce.boolean().optional(),
+  /** Restrict to SKUs that have an active price schedule. */
+  scheduled: z.coerce.boolean().optional(),
 });
 
 const selectCols = sql`
   id, sku, asin, title, image_url as "imageUrl", channel,
   fulfillment_channel as "fulfillmentChannel",
+  fn_sku as "fnSku",
   price::float8 as price, base_price::float8 as "basePrice",
   cost::float8 as cost, stock, sales_30d as "sales30d",
+  sales_metrics as "salesMetrics",
   status, favorite, tags,
   created_at as "createdAt", updated_at as "updatedAt"
 `;
@@ -38,6 +42,11 @@ export default async function skuRoutes(app: FastifyInstance) {
       ${q.status ? sql`and status = ${q.status}` : sql``}
       ${q.channel ? sql`and channel = ${q.channel}` : sql``}
       ${q.favorite ? sql`and favorite = true` : sql``}
+      ${q.scheduled ? sql`and id in (
+          select sku_id from price_schedules
+          where workspace_id = ${wsId}
+            and status in ('scheduled','running')
+        )` : sql``}
     `;
 
     const [{ count }] = await sql<{ count: number }[]>`
@@ -62,6 +71,39 @@ export default async function skuRoutes(app: FastifyInstance) {
       actor: req.user!.email,
     });
     return { ok: true };
+  });
+
+  /**
+   * Stat cards on the SKUs page: active count, scheduled updates count,
+   * total channel stock, and 30-day sales revenue. One round-trip for all 4.
+   */
+  app.get("/skus/stats", async (req) => {
+    const wsId = req.user!.workspaceId;
+    const [row] = await sql<
+      {
+        activeSkus: number;
+        scheduledUpdates: number;
+        totalChannelStock: number;
+        sales30d: number;
+      }[]
+    >`
+      select
+        (select count(*)::int from skus
+           where workspace_id = ${wsId} and status = 'active') as "activeSkus",
+        (select count(*)::int from price_schedules
+           where workspace_id = ${wsId}
+             and status in ('scheduled','running')) as "scheduledUpdates",
+        (select coalesce(sum(stock),0)::int from skus
+           where workspace_id = ${wsId}) as "totalChannelStock",
+        (select coalesce(sum(
+            ((m->>'units')::int) * (s.price::float8)
+          ), 0)::float8
+         from skus s,
+              jsonb_array_elements(s.sales_metrics) m
+         where s.workspace_id = ${wsId}
+           and m->>'period' = '30d') as "sales30d"
+    `;
+    return row;
   });
 
   app.get("/skus/:id", async (req, reply) => {

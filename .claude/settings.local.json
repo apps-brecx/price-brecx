@@ -26,7 +26,8 @@
       "Bash(pnpm --filter @fbm/api run typecheck)",
       "Bash(pnpm --filter @fbm/web run typecheck)",
       "Bash(pnpm db:migrate)",
-      "Bash(npx tsx *)"
+      "Bash(npx tsx *)",
+      "Bash(Select-Object Name)"
     ]
   }
 }

@@ -6,6 +6,7 @@ import type {
   CompetitiveSummaryResponse,
   FbaQty,
   ListingRow,
+  OrderRow,
   ProductOffer,
   SpapiCredentials,
 } from "./types.js";
@@ -149,6 +150,7 @@ export class SpapiProvider implements AmazonProvider {
   async getMerchantListings(): Promise<ListingRow[]> {
     const token = await this.getAccessToken();
     const base = this.creds.endpoint;
+    logger.info("   📋 requesting merchant listings report from Amazon…");
 
     let create;
     try {
@@ -157,6 +159,10 @@ export class SpapiProvider implements AmazonProvider {
         {
           reportType: "GET_MERCHANT_LISTINGS_ALL_DATA",
           marketplaceIds: [this.creds.marketplaceId],
+          // `custom: "true"` makes Amazon include the optional `image-url`
+          // column (legacy app's secret — without this, image_url is NULL
+          // for every row).
+          reportOptions: { custom: "true" },
         },
         { headers: this.authHeaders(token) },
       );
@@ -165,6 +171,7 @@ export class SpapiProvider implements AmazonProvider {
     }
     const reportId = create.data?.reportId as string | undefined;
     if (!reportId) throw new Error("SP-API: no reportId returned");
+    logger.info(`   📋 listings report queued (id=${reportId}) — polling…`);
 
     // Poll: 5s, backing off +5s up to 60s, ≤40 tries.
     let documentId: string | undefined;
@@ -176,6 +183,9 @@ export class SpapiProvider implements AmazonProvider {
         { headers: this.authHeaders(token) },
       );
       const status = st.data?.processingStatus as string;
+      logger.info(
+        `   📋 poll #${i + 1} → status=${status} (next in ${delay / 1000}s)`,
+      );
       if (status === "DONE") {
         documentId = st.data.reportDocumentId as string;
         break;
@@ -187,6 +197,7 @@ export class SpapiProvider implements AmazonProvider {
     }
     if (!documentId) throw new Error("SP-API report timed out");
 
+    logger.info("   📋 listings report ready — downloading…");
     const doc = await axios.get(
       `${base}/reports/2021-06-30/documents/${documentId}`,
       { headers: this.authHeaders(token) },
@@ -202,8 +213,11 @@ export class SpapiProvider implements AmazonProvider {
     const text = gz
       ? zlib.gunzipSync(buf).toString("utf-8")
       : buf.toString("utf-8");
+    logger.info(
+      `   📋 listings report downloaded (${Math.round(buf.length / 1024)} KB${gz ? ", gunzipped" : ""}) — parsing…`,
+    );
     const rows = parseListingsTsv(text);
-    logger.info({ rows: rows.length }, "SP-API merchant listings parsed");
+    logger.info(`   📋 listings parsed → ${rows.length} rows`);
     return rows;
   }
 
@@ -219,6 +233,7 @@ export class SpapiProvider implements AmazonProvider {
     const base = this.creds.endpoint;
     const out = new Map<string, FbaQty>();
     let nextToken: string | undefined;
+    logger.info("   📦 fetching FBA inventory summaries (paginated)…");
 
     for (let page = 0; page < 200; page++) {
       let res;
@@ -254,6 +269,9 @@ export class SpapiProvider implements AmazonProvider {
         });
       }
       nextToken = res.data?.pagination?.nextToken;
+      logger.info(
+        `   📦 FBA page ${page + 1} → ${summaries.length} items (total so far: ${out.size}${nextToken ? ", more pages…" : ", done"})`,
+      );
       if (!nextToken) break;
     }
     return out;
@@ -356,6 +374,139 @@ export class SpapiProvider implements AmazonProvider {
     }
     throw spError("competitiveSummary", lastErr);
   }
+
+  /**
+   * Listings Items API v2021-08-01 GET by SKU with `includedData=summaries`.
+   * Returns the listing's main image + FBA barcode (fn-sku). Per-SKU call —
+   * caller paces. Retries 429 once with backoff; 404 → both fields null.
+   */
+  async getListingSummary(
+    sku: string,
+  ): Promise<{
+    imageUrl: string | null;
+    fnSku: string | null;
+    itemName: string | null;
+  }> {
+    const url = `${this.creds.endpoint}/listings/2021-08-01/items/${
+      this.creds.sellerId
+    }/${encodeURIComponent(sku)}`;
+    for (let attempt = 0; attempt <= 2; attempt++) {
+      const token = await this.getAccessToken();
+      try {
+        const res = await axios.get(url, {
+          headers: { "x-amz-access-token": token },
+          params: {
+            marketplaceIds: this.creds.marketplaceId,
+            includedData: "summaries",
+          },
+          timeout: 15_000,
+          validateStatus: () => true,
+        });
+        if (res.status === 404) {
+          return { imageUrl: null, fnSku: null, itemName: null };
+        }
+        if (res.status === 429 && attempt < 2) {
+          await this.wait(2_000 * (attempt + 1) + Math.random() * 500);
+          continue;
+        }
+        if (res.status >= 300) {
+          throw new Error(
+            `Listings GET ${res.status}: ${JSON.stringify(res.data).slice(0, 200)}`,
+          );
+        }
+        const summary = res.data?.summaries?.[0] ?? {};
+        return {
+          imageUrl: summary.mainImage?.link ?? null,
+          fnSku: summary.fnSku ?? null,
+          itemName: summary.itemName ?? null,
+        };
+      } catch (err) {
+        if (attempt === 2) throw spError("Listings GET", err);
+        await this.wait(1_000 * (attempt + 1));
+      }
+    }
+    return { imageUrl: null, fnSku: null, itemName: null };
+  }
+
+  /**
+   * GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL — settled orders
+   * updated in [now - daysBack, now]. Same create→poll→download→parse pattern
+   * as the merchant listings report. Returns raw OrderRow[]; aggregation is
+   * done by amazon/salesAggregator.ts.
+   */
+  async getOrdersReport(daysBack: number): Promise<OrderRow[]> {
+    const token = await this.getAccessToken();
+    const base = this.creds.endpoint;
+    const dataStartTime = new Date(
+      Date.now() - daysBack * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    logger.info(
+      `   💰 requesting orders report (last ${daysBack} days, since ${dataStartTime.slice(0, 10)})…`,
+    );
+
+    let create;
+    try {
+      create = await axios.post(
+        `${base}/reports/2021-06-30/reports`,
+        {
+          reportType: "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL",
+          marketplaceIds: [this.creds.marketplaceId],
+          dataStartTime,
+        },
+        { headers: this.authHeaders(token) },
+      );
+    } catch (err) {
+      throw spError("Orders report create", err);
+    }
+    const reportId = create.data?.reportId as string | undefined;
+    if (!reportId) throw new Error("SP-API: no reportId returned (orders)");
+    logger.info(`   💰 orders report queued (id=${reportId}) — polling…`);
+
+    let documentId: string | undefined;
+    let delay = 5_000;
+    for (let i = 0; i < 40; i++) {
+      await this.wait(delay);
+      const st = await axios.get(
+        `${base}/reports/2021-06-30/reports/${reportId}`,
+        { headers: this.authHeaders(token) },
+      );
+      const status = st.data?.processingStatus as string;
+      logger.info(
+        `   💰 poll #${i + 1} → status=${status} (next in ${delay / 1000}s)`,
+      );
+      if (status === "DONE") {
+        documentId = st.data.reportDocumentId as string;
+        break;
+      }
+      if (status === "CANCELLED" || status === "FATAL") {
+        throw new Error(`SP-API orders report ${status}`);
+      }
+      if (delay < 60_000) delay += 5_000;
+    }
+    if (!documentId) throw new Error("SP-API orders report timed out");
+
+    const doc = await axios.get(
+      `${base}/reports/2021-06-30/documents/${documentId}`,
+      { headers: this.authHeaders(token) },
+    );
+    const docUrl = doc.data?.url as string;
+    const gz = doc.data?.compressionAlgorithm === "GZIP";
+
+    logger.info("   💰 orders report ready — downloading…");
+    const dl = await axios.get<ArrayBuffer>(docUrl, {
+      responseType: "arraybuffer",
+    });
+    const buf = Buffer.from(dl.data);
+    const text = gz
+      ? zlib.gunzipSync(buf).toString("utf-8")
+      : buf.toString("utf-8");
+    logger.info(
+      `   💰 orders report downloaded (${Math.round(buf.length / 1024)} KB${gz ? ", gunzipped" : ""}) — parsing…`,
+    );
+    const rows = parseOrdersTsv(text);
+    logger.info(`   💰 orders parsed → ${rows.length} rows`);
+    return rows;
+  }
 }
 
 /**
@@ -396,16 +547,32 @@ function spError(label: string, err: unknown): Error {
 function parseListingsTsv(tsv: string): ListingRow[] {
   const lines = tsv.split(/\r?\n/).filter((l) => l.length > 0);
   if (lines.length < 2) return [];
-  const header = lines[0].split("\t").map((h) => h.trim());
-  const col = (name: string) => header.indexOf(name);
-  const iName = col("item-name");
-  const iSku = col("seller-sku");
-  const iAsin = col("asin1");
-  const iPrice = col("price");
-  const iQty = col("quantity");
-  const iImg = col("image-url");
-  const iFc = col("fulfillment-channel");
-  const iStatus = col("status");
+  // Lowercase header lookup so we tolerate Amazon's case variations between
+  // standard vs. custom-flagged reports.
+  const header = lines[0].split("\t").map((h) => h.trim().toLowerCase());
+  logger.info(`   📋 report headers: ${header.join(" | ")}`);
+  /** First matching index from a list of synonyms (-1 if none). */
+  const colAny = (...names: string[]): number => {
+    for (const n of names) {
+      const i = header.indexOf(n.toLowerCase());
+      if (i !== -1) return i;
+    }
+    return -1;
+  };
+  const iName = colAny("item-name", "product-name");
+  const iSku = colAny("seller-sku", "sku");
+  const iAsin = colAny("asin1", "asin");
+  const iPrice = colAny("price");
+  const iQty = colAny("quantity");
+  const iImg = colAny("image-url", "main-image-url", "image_url");
+  // British / US spelling + the custom-report variant.
+  const iFc = colAny(
+    "fulfillment-channel",
+    "fulfilment-channel",
+    "fulfillment_channel",
+    "fulfilment_channel",
+  );
+  const iStatus = colAny("status", "listing-status");
 
   const rows: ListingRow[] = [];
   for (let r = 1; r < lines.length; r++) {
@@ -423,6 +590,47 @@ function parseListingsTsv(tsv: string): ListingRow[] {
       imageUrl: (c[iImg] ?? "").trim() || null,
       fulfillmentChannel: (c[iFc] ?? "").trim() || null,
       status: (c[iStatus] ?? "").trim() || "Unknown",
+    });
+  }
+  return rows;
+}
+
+/** GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL is a tab-separated
+ *  flat-file with a header row. Columns vary slightly across regions but the
+ *  common ones we use are: amazon-order-id, purchase-date, sku, asin,
+ *  quantity, item-price, item-status. */
+function parseOrdersTsv(tsv: string): OrderRow[] {
+  const lines = tsv.split(/\r?\n/).filter((l) => l.length > 0);
+  if (lines.length < 2) return [];
+  const header = lines[0].split("\t").map((h) => h.trim().toLowerCase());
+  const col = (name: string) => header.indexOf(name);
+  const iOrder = col("amazon-order-id");
+  const iDate = col("purchase-date");
+  const iSku = col("sku");
+  const iAsin = col("asin");
+  const iQty = col("quantity");
+  const iPrice = col("item-price");
+  const iStatus = col("item-status");
+
+  const rows: OrderRow[] = [];
+  for (let r = 1; r < lines.length; r++) {
+    const c = lines[r].split("\t");
+    const sku = (c[iSku] ?? "").trim();
+    if (!sku) continue;
+    const dateRaw = (c[iDate] ?? "").trim();
+    const purchaseDate = dateRaw ? new Date(dateRaw) : new Date(0);
+    if (Number.isNaN(purchaseDate.getTime())) continue;
+    const qty = Math.trunc(Number((c[iQty] ?? "0").trim())) || 0;
+    const priceRaw = (c[iPrice] ?? "").trim();
+    const itemPrice = priceRaw ? Number(priceRaw) : 0;
+    rows.push({
+      amazonOrderId: (c[iOrder] ?? "").trim(),
+      purchaseDate,
+      sku,
+      asin: (c[iAsin] ?? "").trim() || null,
+      quantity: qty,
+      itemPrice: Number.isNaN(itemPrice) ? 0 : itemPrice,
+      itemStatus: (c[iStatus] ?? "").trim(),
     });
   }
   return rows;

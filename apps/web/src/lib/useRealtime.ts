@@ -70,8 +70,21 @@ export function useRealtime(): void {
             qc.invalidateQueries({ queryKey: ["activity"] });
             if (msg.ok === false) {
               toast.error(
-                "Amazon sync failed",
+                msg.stage ? `${msg.stage} sync failed` : "Amazon sync failed",
                 msg.error || "See the Activity Log for details.",
+              );
+            } else if (msg.stage) {
+              // One of the 4 staged daily crons (listings/images/fba/sales).
+              const labels: Record<string, string> = {
+                listings: "Listings",
+                images: "Images",
+                fba: "FBA stock",
+                sales: "Sales metrics",
+              };
+              const label = labels[msg.stage] ?? msg.stage;
+              toast.info(
+                `${label} synced`,
+                msg.count != null ? `${msg.count} SKUs updated` : "",
               );
             } else if (msg.mode === "stub") {
               toast.warning(

@@ -4,6 +4,7 @@ import type {
   CompetitiveSummaryResponse,
   FbaQty,
   ListingRow,
+  OrderRow,
   ProductOffer,
 } from "./types.js";
 
@@ -45,5 +46,20 @@ export class StubAmazonProvider implements AmazonProvider {
       "Amazon SP-API not configured — Buy Box scan returns no results",
     );
     return { responses: [] };
+  }
+
+  async getOrdersReport(): Promise<OrderRow[]> {
+    logger.warn(
+      "Amazon SP-API not configured — sales metrics sync returns no orders",
+    );
+    return [];
+  }
+
+  async getListingSummary(): Promise<{
+    imageUrl: string | null;
+    fnSku: string | null;
+    itemName: string | null;
+  }> {
+    return { imageUrl: null, fnSku: null, itemName: null };
   }
 }

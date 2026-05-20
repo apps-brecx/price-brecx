@@ -77,6 +77,18 @@ export const tagSchema = z.object({
 });
 export type Tag = z.infer<typeof tagSchema>;
 
+/** Period code for SKU sales aggregates. Matches the legacy app's `time`
+ *  field ("1 D" / "7 D" / "15 D" / "30 D"), normalized to a short code. */
+export const SALES_PERIODS = ["1d", "7d", "15d", "30d"] as const;
+export type SalesPeriod = (typeof SALES_PERIODS)[number];
+
+export const salesMetricEntrySchema = z.object({
+  period: z.enum(SALES_PERIODS),
+  units: z.number().int(),
+  revenue: z.number(),
+});
+export type SalesMetricEntry = z.infer<typeof salesMetricEntrySchema>;
+
 export const skuSchema = z.object({
   id: idSchema,
   sku: z.string(),
@@ -86,11 +98,17 @@ export const skuSchema = z.object({
   channel: z.enum(SALES_CHANNELS),
   /** Amazon fulfillment-channel: "DEFAULT" => FBM, else (AMAZON_*) => FBA. */
   fulfillmentChannel: z.string().nullable(),
+  /** Amazon fulfillable barcode (from FBA inventory summaries). */
+  fnSku: z.string().nullable(),
   price: z.number(),
   basePrice: z.number().nullable(),
   cost: z.number().nullable(),
   stock: z.number().int(),
+  /** Legacy single 30-day units (kept for backward compat — derived from
+   *  salesMetrics by the sales sync). */
   sales30d: z.number().int(),
+  /** Per-period sales aggregates (1D / 7D / 15D / 30D). */
+  salesMetrics: z.array(salesMetricEntrySchema).default([]),
   status: z.enum(SKU_STATUSES),
   favorite: z.boolean(),
   tags: z.array(tagSchema),
@@ -105,10 +123,12 @@ export const skuCreateSchema = skuSchema
     asin: true,
     imageUrl: true,
     fulfillmentChannel: true,
+    fnSku: true,
     basePrice: true,
     cost: true,
     stock: true,
     sales30d: true,
+    salesMetrics: true,
     favorite: true,
     tags: true,
   });
@@ -254,6 +274,8 @@ export const lostBuyboxRowSchema = z.object({
   /** Every seller SKU mapped to this ASIN (a seller can list it many times). */
   skus: z.array(z.string()).default([]),
   productName: z.string().nullable(),
+  /** Listing thumbnail (from the merchant listings report). */
+  imageUrl: z.string().nullable().default(null),
   myPrice: z.number().nullable(),
   buyboxPrice: z.number().nullable(),
   buyboxSellerId: z.string().nullable(),
@@ -288,6 +310,7 @@ export const ignoredAsinSchema = z.object({
   note: z.string().nullable(),
   sellerSku: z.string().nullable(),
   productName: z.string().nullable(),
+  imageUrl: z.string().nullable(),
   myPrice: z.number().nullable(),
   buyboxPrice: z.number().nullable(),
   buyboxSellerId: z.string().nullable(),

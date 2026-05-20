@@ -17,6 +17,7 @@ const EMPTY_SUMMARY = {
 
 const ignoredCols = sql`
   asin, note, seller_sku as "sellerSku", product_name as "productName",
+  image_url as "imageUrl",
   my_price::float8 as "myPrice", buybox_price::float8 as "buyboxPrice",
   buybox_seller_id as "buyboxSellerId", marketplace_id as "marketplaceId",
   ignored_at as "ignoredAt"
@@ -101,6 +102,7 @@ export default async function lostBuyboxRoutes(app: FastifyInstance) {
         note: body.note ?? null,
         seller_sku: s?.sellerSku ?? null,
         product_name: s?.productName ?? null,
+        image_url: s?.imageUrl ?? null,
         my_price: s?.myPrice ?? null,
         buybox_price: s?.buyboxPrice ?? null,
         buybox_seller_id: s?.buyboxSellerId ?? null,
@@ -115,6 +117,7 @@ export default async function lostBuyboxRoutes(app: FastifyInstance) {
         "note",
         "seller_sku",
         "product_name",
+        "image_url",
         "my_price",
         "buybox_price",
         "buybox_seller_id",
@@ -123,6 +126,7 @@ export default async function lostBuyboxRoutes(app: FastifyInstance) {
         note             = coalesce(excluded.note, ignored_asins.note),
         seller_sku       = coalesce(excluded.seller_sku, ignored_asins.seller_sku),
         product_name     = coalesce(excluded.product_name, ignored_asins.product_name),
+        image_url        = coalesce(excluded.image_url, ignored_asins.image_url),
         my_price         = coalesce(excluded.my_price, ignored_asins.my_price),
         buybox_price     = coalesce(excluded.buybox_price, ignored_asins.buybox_price),
         buybox_seller_id = coalesce(excluded.buybox_seller_id, ignored_asins.buybox_seller_id)
