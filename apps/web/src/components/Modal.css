@@ -3,8 +3,9 @@
 /* ============= Modal ============= */
 .modal-overlay {
   position: fixed; inset: 0;
-  background: rgba(11, 13, 18, 0.5);
-  backdrop-filter: blur(4px);
+  /* Soft dim, no blur — full-strength blur made the underlying page hard to
+     read at a glance and felt heavy in extended use. */
+  background: rgba(11, 13, 18, 0.35);
   display: none;
   align-items: center; justify-content: center;
   z-index: 200;
@@ -12,7 +13,7 @@
 }
 .modal-overlay.show { display: flex; }
 /* Stacked modal — opens ON TOP of another modal */
-.modal-overlay.stacked { z-index: 220; background: rgba(11, 13, 18, 0.35); }
+.modal-overlay.stacked { z-index: 220; background: rgba(11, 13, 18, 0.25); }
 @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 @keyframes slideUp { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform: translateY(0); } }
 .modal {

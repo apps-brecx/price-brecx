@@ -1019,7 +1019,7 @@ select.form-control {
 /* ============= Drawer (slide-in panel) ============= */
 .drawer-overlay {
   position: fixed; inset: 0;
-  background: rgba(11, 13, 18, 0.4);
+  background: rgba(11, 13, 18, 0.35);
   z-index: 150;
   display: none;
 }
