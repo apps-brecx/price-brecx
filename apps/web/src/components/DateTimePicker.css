@@ -1,0 +1,192 @@
+/* DateTimePicker — extends the DateRangePicker styles for the trigger,
+   adds layout for the calendar+time popover. */
+
+.dtp-wrap {
+  display: block;
+}
+.dtp-wrap .drp-trigger {
+  width: 100%;
+}
+.dtp-single {
+  flex: 1;
+  min-width: 0;
+}
+
+.dtp-popover {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "cal time"
+    "footer footer";
+  padding: 0;
+  min-width: 480px;
+  /* Anchor to the trigger's left edge so the popover grows right (into the
+     drawer body's empty area) instead of left (into the page's gutter).
+     `!important` overrides the inherited `.drp-popover { right: 0 }`. */
+  left: 0 !important;
+  right: auto !important;
+}
+
+.dtp-cal {
+  grid-area: cal;
+  padding: 10px 16px 12px;
+  border-right: 1px solid var(--border);
+}
+.dtp-head {
+  padding: 4px 4px 10px;
+  grid-template-columns: 28px 28px 1fr 28px 28px;
+}
+
+.dtp-time {
+  grid-area: time;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  min-width: 0;
+}
+.dtp-time-head {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: 4px 6px 8px;
+}
+.dtp-time-cols {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto;
+  align-items: start;
+  gap: 6px;
+}
+.dtp-time-sep {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-3);
+  padding: 8px 0;
+  align-self: start;
+}
+.dtp-ampm {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 6px;
+}
+.dtp-ampm-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all .1s;
+}
+.dtp-ampm-btn:hover {
+  color: var(--brand-700);
+  border-color: var(--brand-400);
+}
+.dtp-ampm-btn.active {
+  background: var(--brand-600);
+  color: #fff;
+  border-color: var(--brand-600);
+}
+
+/* Vertical hour/minute pickers — scroll container with a soft top/bottom
+   fade so the active row reads as the focal point. */
+.dtp-scroller {
+  height: 188px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+.dtp-scroller::-webkit-scrollbar { width: 4px; }
+.dtp-scroller::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.dtp-scroll-item {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  padding: 6px 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .1s, color .1s;
+}
+.dtp-scroll-item:hover {
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+.dtp-scroll-item.active {
+  background: var(--brand-600);
+  color: #fff;
+  font-weight: 650;
+}
+
+.dtp-footer {
+  grid-area: footer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.dtp-link {
+  background: transparent;
+  border: none;
+  color: var(--brand-700);
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.dtp-link:hover { background: var(--brand-50); }
+.dtp-cancel,
+.dtp-ok {
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+}
+.dtp-cancel:hover { background: var(--surface); border-color: var(--border-strong, var(--brand-400)); }
+.dtp-ok {
+  background: var(--brand-600);
+  color: #fff;
+  border-color: var(--brand-600);
+}
+.dtp-ok:hover:not(:disabled) {
+  background: var(--brand-700);
+  border-color: var(--brand-700);
+}
+.dtp-ok:disabled { opacity: .5; cursor: not-allowed; }
+
+@media (max-width: 560px) {
+  .dtp-popover {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "cal"
+      "time"
+      "footer";
+    min-width: 0;
+    max-width: 95vw;
+  }
+  .dtp-cal { border-right: none; border-bottom: 1px solid var(--border); }
+  .dtp-time { padding-bottom: 4px; }
+  .dtp-scroller { height: 130px; }
+}

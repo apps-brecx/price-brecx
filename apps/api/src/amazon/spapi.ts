@@ -668,6 +668,84 @@ export class SpapiProvider implements AmazonProvider {
     logger.info(`   💰 orders parsed → ${rows.length} rows`);
     return rows;
   }
+
+  /**
+   * Sales API v1 `/sales/v1/orderMetrics` — daily or monthly unit counts +
+   * average unit price for a single SKU or ASIN. Far cheaper than the
+   * all-orders report (no async report job; single REST call), so this is
+   * what backs the per-SKU sales report modal.
+   *
+   * Quirks worth keeping in mind:
+   *  - SP-API expects `interval` in the form `startISO--endISO`.
+   *  - `granularity=Month` returns one row per calendar month whose
+   *    `interval` covers that whole month.
+   *  - For granularity=Month, the API requires `granularityTimeZone` to be
+   *    `UTC` (it rejects others with InvalidInput). For Day we hand off the
+   *    seller's chosen TZ — we hard-code `America/Los_Angeles` to match the
+   *    legacy app's behavior so historical numbers line up.
+   *  - 429 → bounded retry with exponential backoff (max 4 tries).
+   */
+  async getOrderMetrics(opts: {
+    identifier: string;
+    identifierType: "sku" | "asin";
+    granularity: "Day" | "Month";
+    startDate: string;
+    endDate: string;
+  }): Promise<
+    { intervalStart: string; unitCount: number; averageAmount: number }[]
+  > {
+    const interval = `${opts.startDate}T00:00:00Z--${opts.endDate}T23:59:59Z`;
+    const params: Record<string, string> = {
+      marketplaceIds: this.creds.marketplaceId,
+      interval,
+      granularity: opts.granularity,
+      granularityTimeZone:
+        opts.granularity === "Month" ? "UTC" : "America/Los_Angeles",
+      [opts.identifierType]: opts.identifier,
+    };
+    const url = `${this.creds.endpoint}/sales/v1/orderMetrics`;
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const token = await this.getAccessToken();
+      let res;
+      try {
+        res = await axios.get(url, {
+          headers: { "x-amz-access-token": token },
+          params,
+          timeout: 20_000,
+          validateStatus: () => true,
+        });
+      } catch (err) {
+        if (attempt === 3) throw spError("orderMetrics", err);
+        await this.wait(1_000 * 2 ** attempt);
+        continue;
+      }
+      if (res.status === 429 && attempt < 3) {
+        await this.wait(1_500 * 2 ** attempt + Math.random() * 500);
+        continue;
+      }
+      if (res.status >= 300) {
+        throw new Error(
+          `Sales orderMetrics ${res.status}: ${JSON.stringify(res.data).slice(0, 200)}`,
+        );
+      }
+      const payload = (res.data?.payload ?? []) as Array<{
+        interval?: string;
+        unitCount?: number;
+        averageUnitPrice?: { amount?: number | string };
+      }>;
+      return payload.map((m) => {
+        const start = (m.interval ?? "").split("--")[0] ?? "";
+        const amt = Number(m.averageUnitPrice?.amount ?? 0);
+        return {
+          intervalStart: start,
+          unitCount: Number(m.unitCount ?? 0),
+          averageAmount: Number.isFinite(amt) ? amt : 0,
+        };
+      });
+    }
+    return [];
+  }
 }
 
 /**

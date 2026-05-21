@@ -106,6 +106,23 @@ export interface AmazonProvider {
   getCatalogSummariesByAsin(asins: string[]): Promise<
     Map<string, { itemName: string | null; imageUrl: string | null }>
   >;
+  /** Sales API v1 — `/sales/v1/orderMetrics`. Daily / monthly unit count +
+   *  average price for a single SKU or ASIN. Fast (seconds), cheap on quota,
+   *  and ideal for the per-SKU sales report inside the schedule drawer. */
+  getOrderMetrics(opts: {
+    identifier: string;
+    identifierType: "sku" | "asin";
+    granularity: "Day" | "Month";
+    startDate: string; // YYYY-MM-DD
+    endDate: string;
+  }): Promise<OrderMetric[]>;
+}
+
+export interface OrderMetric {
+  /** ISO start of the interval bucket (Day or Month start). */
+  intervalStart: string;
+  unitCount: number;
+  averageAmount: number;
 }
 
 export interface FbaQty {

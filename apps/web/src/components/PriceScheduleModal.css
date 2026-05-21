@@ -70,6 +70,9 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* Don't let day-card grids in Weekly/Monthly push the drawer width past
+     the panel's declared 640px — children should shrink instead. */
+  min-width: 0;
 }
 .psm-stat-row {
   display: grid;
@@ -102,6 +105,27 @@
 }
 .psm-dot-success { background: var(--success-fg); }
 .psm-dot-muted   { background: var(--text-3); }
+
+/* Full-width "See Pricing & Sales Report" button — sits between the stat
+   row and the timezone strip, just like the legacy app.
+   `flex-shrink: 0` + `box-sizing: border-box` lock its height regardless of
+   how much (or little) content the active tab renders below — without this
+   the parent flex column was squeezing the button taller on the Weekly tab
+   (where there's no mini calendar pulling space) and shorter on Single. */
+.psm-report-btn {
+  width: 100%;
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
+  flex: 0 0 34px;
+  box-sizing: border-box;
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
 
 /* ---- Timezone strip ---- */
 .psm-tz-row {
@@ -220,19 +244,24 @@
   gap: 6px;
 }
 
-/* ---- Weekly/Monthly day grid (compact, fits in 640px drawer) ---- */
+/* ---- Weekly/Monthly day grid (compact, fits in 640px drawer) ----
+   `minmax(0, 1fr)` (instead of plain `1fr`) lets each column shrink past
+   its intrinsic min-content size — without this the day cards' time/price
+   inputs forced the whole drawer wider when switching to Weekly/Monthly. */
 .psm-day-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
 }
 .psm-day-grid.month {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 .psm-day-card {
   background: var(--surface-2);
   border-radius: 8px;
   padding: 8px 10px;
+  min-width: 0;
 }
 .psm-day-head {
   display: flex;

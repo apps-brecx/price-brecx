@@ -13,6 +13,8 @@ import type {
 import { api, qs } from "../lib/api";
 import { money } from "../lib/format";
 import { useToast } from "./Toast";
+import { SalesReportModal } from "./SalesReportModal";
+import { DateTimePicker } from "./DateTimePicker";
 import "./PriceScheduleModal.css";
 
 const browserTz =
@@ -130,6 +132,7 @@ export function PriceScheduleModal({
   const [salePrice, setSalePrice] = useState("");
   const [timezone, setTimezone] = useState(browserTz);
   const [calOffset, setCalOffset] = useState(0); // months relative to today
+  const [reportOpen, setReportOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // `visible` = mounted in DOM; `mounted` = .show class applied (drives the
   // slide-in/out transform). On close, we drop .show first and only unmount
@@ -571,16 +574,29 @@ export function PriceScheduleModal({
             </div>
           </div>
 
-          {/* Timezone */}
-          <div className="psm-tz-row">
-            <span className="psm-tz-label">Timezone</span>
-            <input
-              className="form-control"
-              style={{ fontSize: 12.5, padding: "5px 8px", maxWidth: 200 }}
-              value={timezone}
-              onChange={(e) => setTimezone(e.target.value)}
-            />
-          </div>
+          {/* Quick action — opens the Amazon orderMetrics-backed sales report */}
+          <button
+            type="button"
+            className="btn btn-primary psm-report-btn"
+            onClick={() => setReportOpen(true)}
+          >
+            See Pricing &amp; Sales Report
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <line x1="5" y1="12" x2="19" y2="12" />
+              <polyline points="12 5 19 12 12 19" />
+            </svg>
+          </button>
+
+          {/* Timezone field hidden — `timezone` state still defaults to the
+              browser's IANA zone and is passed to /schedules so behavior is
+              unchanged; field is just out of the UI for now. */}
 
           {err && <div className="psm-error">{err}</div>}
 
@@ -652,13 +668,10 @@ export function PriceScheduleModal({
                   </div>
                   <div className="psm-row3">
                     <span className="psm-row3-tag">Start</span>
-                    <input
-                      type="datetime-local"
-                      className="form-control"
+                    <DateTimePicker
                       value={s.startDate}
-                      onChange={(e) =>
-                        setSingleSlotField(i, "startDate", e.target.value)
-                      }
+                      onChange={(v) => setSingleSlotField(i, "startDate", v)}
+                      placeholder="Pick start date / time"
                     />
                     <input
                       type="number"
@@ -675,13 +688,10 @@ export function PriceScheduleModal({
                   {!s.untilChanged && (
                     <div className="psm-row3">
                       <span className="psm-row3-tag">End</span>
-                      <input
-                        type="datetime-local"
-                        className="form-control"
+                      <DateTimePicker
                         value={s.endDate}
-                        onChange={(e) =>
-                          setSingleSlotField(i, "endDate", e.target.value)
-                        }
+                        onChange={(v) => setSingleSlotField(i, "endDate", v)}
+                        placeholder="Pick end date / time"
                       />
                       <input
                         type="number"
@@ -868,22 +878,20 @@ export function PriceScheduleModal({
                     <div className="psm-field-label">
                       Sale Start <span className="req">*</span>
                     </div>
-                    <input
-                      type="datetime-local"
-                      className="form-control"
+                    <DateTimePicker
                       value={saleStart}
-                      onChange={(e) => setSaleStart(e.target.value)}
+                      onChange={setSaleStart}
+                      placeholder="Pick sale start"
                     />
                   </div>
                   <div>
                     <div className="psm-field-label">
                       Sale End <span className="req">*</span>
                     </div>
-                    <input
-                      type="datetime-local"
-                      className="form-control"
+                    <DateTimePicker
                       value={saleEnd}
-                      onChange={(e) => setSaleEnd(e.target.value)}
+                      onChange={setSaleEnd}
+                      placeholder="Pick sale end"
                     />
                   </div>
                   <div>
@@ -989,6 +997,16 @@ export function PriceScheduleModal({
           </button>
         </div>
       </aside>
+
+      <SalesReportModal
+        open={reportOpen}
+        sku={renderSku.sku}
+        asin={renderSku.asin ?? null}
+        title={renderSku.title}
+        imageUrl={renderSku.imageUrl ?? null}
+        price={renderSku.price}
+        onClose={() => setReportOpen(false)}
+      />
     </>
   );
 }

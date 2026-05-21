@@ -84,4 +84,10 @@ export class StubAmazonProvider implements AmazonProvider {
   > {
     return new Map();
   }
+
+  async getOrderMetrics(): Promise<
+    { intervalStart: string; unitCount: number; averageAmount: number }[]
+  > {
+    return [];
+  }
 }

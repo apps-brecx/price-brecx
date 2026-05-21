@@ -1,0 +1,270 @@
+/* Ant-Design-style date range picker — co-located styles. */
+
+.drp-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+/* Trigger — two value pills + arrow + calendar icon, sized to match
+   other `.form-control` inputs in the toolbar. */
+.drp-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color .12s, box-shadow .12s;
+  color: var(--text);
+}
+.drp-trigger:hover {
+  border-color: var(--brand-400);
+}
+.drp-trigger.active {
+  border-color: var(--brand-600);
+  box-shadow: 0 0 0 2px var(--brand-50);
+}
+.drp-trigger-value {
+  min-width: 86px;
+  font-variant-numeric: tabular-nums;
+}
+.drp-trigger-value.placeholder {
+  color: var(--text-3);
+}
+.drp-arrow {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.drp-cal-icon {
+  color: var(--text-3);
+  flex-shrink: 0;
+  transition: opacity .1s;
+}
+
+/* Clear (×) button — overlays the calendar icon when the trigger has a
+   range and the user is hovering it. Mirrors Ant Design's swap pattern. */
+.drp-clear-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: var(--text-3);
+  color: #fff;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.drp-clear-btn:hover {
+  background: var(--text-2);
+}
+.drp-trigger {
+  position: relative;
+}
+.drp-trigger.has-value:hover .drp-cal-icon {
+  opacity: 0;
+}
+.drp-trigger.has-value:hover .drp-clear-btn {
+  display: inline-flex;
+}
+
+/* Popover — preset rail on the left + two month panels on the right. */
+.drp-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  display: flex;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow:
+    0 12px 32px rgba(11, 13, 18, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.02);
+  z-index: 250;
+  font-size: 13px;
+  animation: drpPop .14s ease-out;
+  user-select: none;
+}
+@keyframes drpPop {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.drp-presets {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  padding: 8px 0;
+  min-width: 120px;
+}
+.drp-preset {
+  text-align: left;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-2);
+  font-family: inherit;
+  transition: background .1s, color .1s;
+}
+.drp-preset:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.drp-clear {
+  margin-top: auto;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.drp-panes {
+  display: flex;
+  flex-direction: column;
+}
+.drp-pane-head {
+  display: grid;
+  grid-template-columns: 28px 28px 1fr 1fr 28px 28px;
+  align-items: center;
+  padding: 8px 12px;
+  gap: 4px;
+}
+.drp-nav {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-2);
+  border-radius: 4px;
+  font-size: 16px;
+  line-height: 1;
+}
+.drp-nav:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.drp-pane-title {
+  text-align: center;
+  font-weight: 650;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.drp-pane-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 0 12px 12px;
+}
+.drp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 32px);
+  gap: 0;
+}
+.drp-dh {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 600;
+}
+
+.drp-cell {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text);
+  font-family: inherit;
+  padding: 0;
+  position: relative;
+  font-variant-numeric: tabular-nums;
+}
+.drp-cell span {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .1s, color .1s;
+  position: relative;
+  z-index: 1;
+}
+.drp-cell:hover span {
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+.drp-cell.out {
+  color: var(--text-4, #cbd0d8);
+}
+.drp-cell.out span { background: transparent; }
+.drp-cell.today span {
+  border: 1px solid var(--brand-600);
+}
+/* In-range band — a flat horizontal bar; corners get rounded only at the
+   start/end pills so it visually connects across days. */
+.drp-cell.in-range::before {
+  content: "";
+  position: absolute;
+  inset: 3px 0;
+  background: var(--brand-50);
+  z-index: 0;
+}
+.drp-cell.start::before {
+  left: 50%;
+  border-radius: 999px 0 0 999px;
+}
+.drp-cell.end::before {
+  right: 50%;
+  border-radius: 0 999px 999px 0;
+}
+.drp-cell.start.end::before {
+  /* Single-day selection — no band, just the pill. */
+  display: none;
+}
+.drp-cell.start span,
+.drp-cell.end span {
+  background: var(--brand-600);
+  color: #fff;
+  font-weight: 600;
+}
+.drp-cell.start:hover span,
+.drp-cell.end:hover span {
+  background: var(--brand-700);
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  /* Stack the second month and shrink presets to a horizontal strip. */
+  .drp-popover { flex-direction: column; max-width: 92vw; }
+  .drp-presets {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 6px;
+    min-width: 0;
+  }
+  .drp-clear { margin-top: 0; }
+  .drp-pane-grid { grid-template-columns: 1fr; }
+  .drp-pane-head { grid-template-columns: 28px 28px 1fr 28px 28px; }
+  .drp-pane-head .drp-pane-title:nth-child(4) { display: none; }
+}

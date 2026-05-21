@@ -1,0 +1,324 @@
+/* Sales Report modal — co-located styles for the bar/pie chart + table view.
+   Designed to fit inside the shared Modal "xl" size (max-width 920px). */
+
+.srm-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+.srm-thumb {
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.srm-thumb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  font-weight: 700;
+  font-size: 20px;
+}
+.srm-product-title {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  margin-bottom: 4px;
+}
+.srm-product-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.srm-price-pill {
+  background: var(--brand-600);
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-weight: 600;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chart-head toolbar: SKU/ASIN · dates · By Day/Month/Table — wraps on
+   narrow screens so nothing overflows the modal. */
+.srm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.srm-dates {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.srm-dates .form-control {
+  height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+  width: 140px;
+}
+.srm-dates-sep {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.srm-presets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.srm-presets-label {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-right: 4px;
+}
+.srm-presets button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+.srm-presets button:hover {
+  border-color: var(--brand-400);
+  color: var(--brand-700);
+}
+
+/* ---- Summary stats ---- */
+.srm-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.srm-stat-card {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.srm-stat-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.srm-stat-value {
+  font-size: 18px;
+  font-weight: 650;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Chart layout ---- */
+.srm-chart-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.srm-chart-row:has(.srm-pie-card) {
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+/* Grid + flex items default to `min-width: auto`, which is computed from
+   the child's intrinsic size — for an SVG bar chart that's ~1800px, so the
+   chart card would shove the modal wider than 95vw. Forcing `min-width: 0`
+   tells the layout engine to respect the column's `1fr` track instead. */
+.srm-chart-card,
+.srm-pie-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-width: 0;
+  overflow: hidden;
+}
+.srm-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.srm-chart-title {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.srm-bar-wrap {
+  position: relative;
+  min-width: 0;
+}
+/* SVG uses a viewBox so it scales to whatever width the card gives it;
+   no horizontal scroll anymore. */
+.srm-bar-scroll {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.srm-bar-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Floating tooltip — positioned at the cursor via inline left/top from
+   pageX/pageY. Lives outside the scroll container so tall bars don't clip
+   it. */
+.srm-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: #0b0d12;
+  color: #fff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-width: 160px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .25);
+  z-index: 5;
+  font-size: 12px;
+  animation: srmTooltipPop .12s ease-out;
+}
+.srm-tooltip-fixed {
+  position: fixed;
+  z-index: 240;
+}
+@keyframes srmTooltipPop {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.srm-tooltip-title {
+  font-weight: 650;
+  font-size: 12.5px;
+  margin-bottom: 6px;
+  color: #fff;
+}
+.srm-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, .8);
+  padding: 2px 0;
+}
+.srm-tooltip-row strong {
+  color: #fff;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Pie chart + legend ---- */
+.srm-pie-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.srm-pie {
+  display: block;
+}
+.srm-pie-legend {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.srm-legend-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background .1s;
+}
+.srm-legend-row:hover,
+.srm-legend-row.active {
+  background: var(--surface-2);
+}
+.srm-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.srm-legend-label {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.srm-legend-pct {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Data table view ---- */
+.srm-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.srm-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+}
+.srm-table thead th {
+  background: var(--surface-2);
+  padding: 9px 12px;
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  font-weight: 650;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+}
+.srm-table tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.srm-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+@media (max-width: 720px) {
+  .srm-stats { grid-template-columns: 1fr; }
+  .srm-chart-row,
+  .srm-chart-row:has(.srm-pie-card) {
+    grid-template-columns: 1fr;
+  }
+}

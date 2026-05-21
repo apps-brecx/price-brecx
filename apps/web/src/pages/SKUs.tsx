@@ -614,40 +614,6 @@ export function SKUs() {
         </button>
 
         <button
-          className="btn btn-secondary btn-sm"
-          title="Pending price schedules"
-          onClick={() => setTab("scheduled")}
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <rect x="3" y="4" width="18" height="18" rx="2" />
-            <path d="M16 2v4M8 2v4M3 10h18" />
-          </svg>
-          Schedule Price
-          {stats?.scheduledUpdates ? (
-            <span
-              style={{
-                marginLeft: 6,
-                background: "var(--brand-600)",
-                color: "#fff",
-                borderRadius: 4,
-                padding: "1px 6px",
-                fontSize: 11,
-                fontWeight: 600,
-              }}
-            >
-              {stats.scheduledUpdates}
-            </span>
-          ) : null}
-        </button>
-
-        <button
           className="btn btn-primary btn-sm"
           onClick={() => setCreateOpen(true)}
         >

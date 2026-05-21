@@ -20,7 +20,7 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  size?: "lg" | "xl";
+  size?: "lg" | "xl" | "full";
 }) {
   if (!open) return null;
   return (

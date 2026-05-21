@@ -22,10 +22,22 @@
   box-shadow: 0 25px 50px -12px rgba(0,0,0,.25);
   width: 90%; max-width: 520px;
   max-height: 90vh; overflow-y: auto;
+  /* Don't let oversized children (charts, tables) push the modal wider than
+     its max-width — they should scroll inside their own container instead. */
+  overflow-x: hidden;
   animation: slideUp .2s ease;
 }
+.modal-body { min-width: 0; }
 .modal-lg { max-width: 720px; }
 .modal-xl { max-width: 920px; }
+/* Near-fullscreen — used by the sales report modal where 920px crops the
+   chart. 95vw on both axes leaves a small breathing edge so the backdrop is
+   still visible. */
+.modal-full {
+  max-width: 95vw;
+  width: 95vw;
+  max-height: 95vh;
+}
 .modal-header {
   padding: 18px 22px;
   border-bottom: 1px solid var(--border);
