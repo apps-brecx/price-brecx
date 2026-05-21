@@ -1,11 +1,43 @@
 import "./Products.css";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Product, Paginated } from "@fbm/shared";
+import { CHANNEL_LABELS, SALES_CHANNELS } from "@fbm/shared";
 import { api } from "../lib/api";
-import { date } from "../lib/format";
+import { money, num, relativeTime } from "../lib/format";
 import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
+import { useToast } from "../components/Toast";
+
+interface ChannelPrice {
+  sku: string;
+  price: number;
+  basePrice: number | null;
+}
+
+interface ProductRow {
+  id: string;
+  name: string;
+  description: string | null;
+  asin: string | null;
+  skuIds: string[];
+  createdAt: string;
+  updatedAt: string | null;
+  primarySku: string;
+  skuCount: number;
+  channels: Record<string, ChannelPrice>;
+}
+
+interface ProductsData {
+  items: ProductRow[];
+  total: number;
+  knownChannels: string[];
+  agg: {
+    totalProducts: number;
+    avgBasePrice: number | null;
+    listedOnAllChannels: number;
+    lastEditedAt: string | null;
+  };
+}
 
 interface ProductDraft {
   name: string;
@@ -14,29 +46,71 @@ interface ProductDraft {
 
 const emptyDraft: ProductDraft = { name: "", description: "" };
 
+/** Fallback channel order if the workspace has none yet — keeps the table
+ *  structure visible even before any SKUs are linked. */
+const FALLBACK_CHANNELS = ["amazon", "walmart", "tiktok", "shopify"] as const;
+
+function csvCell(v: string | number | null | undefined): string {
+  const s = v == null ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 export function Products() {
   const qc = useQueryClient();
+  const toast = useToast();
   const [createOpen, setCreateOpen] = useState(false);
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft);
+  const [search, setSearch] = useState("");
 
   const query = useQuery({
     queryKey: ["products"],
-    queryFn: () => api.get<Paginated<Product>>("/products"),
+    queryFn: () => api.get<ProductsData>("/products"),
   });
 
   const createMut = useMutation({
     mutationFn: (body: { name: string; description?: string; skuIds: string[] }) =>
-      api.post<Product>("/products", body),
+      api.post<ProductRow>("/products", body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["nav-counts"] });
       setCreateOpen(false);
       setDraft(emptyDraft);
+      toast.success("Product created");
     },
+    onError: (err) =>
+      toast.error(
+        "Couldn't create product",
+        err instanceof Error ? err.message : "Please try again.",
+      ),
   });
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.del<{ ok: true }>(`/products/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["products"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["nav-counts"] });
+      toast.success("Product deleted");
+    },
+  });
+
+  const syncMut = useMutation({
+    mutationFn: () =>
+      api.post<{ ok: boolean; inserted: number; updated: number }>(
+        "/products/sync",
+      ),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["nav-counts"] });
+      toast.success(
+        "Products synced",
+        `${data.inserted} new · ${data.updated} relinked`,
+      );
+    },
+    onError: (err) =>
+      toast.error(
+        "Couldn't sync products",
+        err instanceof Error ? err.message : "Please try again.",
+      ),
   });
 
   function openCreate() {
@@ -54,7 +128,7 @@ export function Products() {
     });
   }
 
-  function confirmDelete(p: Product) {
+  function confirmDelete(p: ProductRow) {
     if (window.confirm(`Delete product "${p.name}"? This cannot be undone.`)) {
       deleteMut.mutate(p.id);
     }
@@ -62,6 +136,65 @@ export function Products() {
 
   const data = query.data;
   const items = data?.items ?? [];
+
+  // Columns: real channels from the data; fall back to a canonical set so the
+  // header stays meaningful before any SKU is linked.
+  const channels = useMemo(() => {
+    const known = data?.knownChannels ?? [];
+    if (known.length > 0) {
+      // Preserve SALES_CHANNELS ordering for stability across renders.
+      const order = SALES_CHANNELS as readonly string[];
+      return [...known].sort(
+        (a, b) =>
+          (order.indexOf(a) === -1 ? 99 : order.indexOf(a)) -
+          (order.indexOf(b) === -1 ? 99 : order.indexOf(b)),
+      );
+    }
+    return [...FALLBACK_CHANNELS];
+  }, [data?.knownChannels]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.description ?? "").toLowerCase().includes(q) ||
+        p.primarySku.toLowerCase().includes(q),
+    );
+  }, [items, search]);
+
+  function exportCsv() {
+    if (filtered.length === 0) return;
+    const header = ["Product", "Primary SKU", ...channels.map((c) =>
+      (CHANNEL_LABELS as Record<string, string>)[c] ?? c,
+    )];
+    const lines = [
+      header.join(","),
+      ...filtered.map((p) =>
+        [
+          p.name,
+          p.primarySku,
+          ...channels.map((c) =>
+            p.channels[c]?.price != null
+              ? p.channels[c].price.toFixed(2)
+              : "",
+          ),
+        ]
+          .map(csvCell)
+          .join(","),
+      ),
+    ];
+    const blob = new Blob([lines.join("\r\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `products-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <div>
@@ -76,6 +209,16 @@ export function Products() {
         }}
       >
         <div>
+          <h1
+            style={{
+              fontSize: 22,
+              fontWeight: 700,
+              letterSpacing: "-0.02em",
+              marginBottom: 4,
+            }}
+          >
+            Products
+          </h1>
           <div
             style={{
               fontSize: 13,
@@ -83,10 +226,45 @@ export function Products() {
               fontWeight: 500,
             }}
           >
-            Group SKUs into products for unified base pricing.
+            Base prices across all connected marketplaces.
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            title="Group SKUs by ASIN — picks up any new listings since the last sync"
+            disabled={syncMut.isPending}
+            onClick={() => syncMut.mutate()}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+            </svg>
+            {syncMut.isPending ? "Syncing…" : "Sync from SKUs"}
+          </button>
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={filtered.length === 0}
+            onClick={exportCsv}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+            </svg>
+            Export
+          </button>
           <button className="btn btn-primary btn-sm" onClick={openCreate}>
             <svg
               width="13"
@@ -99,101 +277,242 @@ export function Products() {
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            New product
+            Add Product
           </button>
         </div>
       </div>
 
-      {/* Products table */}
       {query.isLoading ? (
         <Loading />
-      ) : query.isError ? (
+      ) : query.isError || !data ? (
         <ErrorState />
-      ) : items.length === 0 ? (
-        <EmptyState
-          title="No products yet"
-          message="Create a product to group related SKUs together."
-          action={
-            <button className="btn btn-primary" onClick={openCreate}>
+      ) : (
+        <>
+          {/* KPI cards */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: 14,
+              marginBottom: 20,
+            }}
+          >
+            <div className="dash-kpi">
+              <div className="dash-kpi-label">Total Products</div>
+              <div className="dash-kpi-value">{num(data.agg.totalProducts)}</div>
+              <div className="dash-kpi-foot">
+                <span className="dash-chip flat">→</span>
+                <span>across catalogue</span>
+              </div>
+            </div>
+            <div className="dash-kpi">
+              <div className="dash-kpi-label">Avg. base price</div>
+              <div className="dash-kpi-value">
+                {data.agg.avgBasePrice != null
+                  ? money(data.agg.avgBasePrice)
+                  : "—"}
+              </div>
+              <div className="dash-kpi-foot">
+                <span className="dash-chip flat">→</span>
+                <span>across linked SKUs</span>
+              </div>
+            </div>
+            <div className="dash-kpi">
+              <div className="dash-kpi-label">Listed on all channels</div>
+              <div className="dash-kpi-value">
+                {num(data.agg.listedOnAllChannels)}
+              </div>
+              <div className="dash-kpi-foot">
+                <span className="dash-chip flat">→</span>
+                <span>of {num(data.agg.totalProducts)} products</span>
+              </div>
+            </div>
+            <div className="dash-kpi">
+              <div className="dash-kpi-label">Last edited</div>
+              <div
+                className="dash-kpi-value"
+                style={{ fontSize: 22 }}
+                title={data.agg.lastEditedAt ?? undefined}
+              >
+                {data.agg.lastEditedAt
+                  ? relativeTime(data.agg.lastEditedAt)
+                  : "—"}
+              </div>
+              <div className="dash-kpi-foot">
+                <span className="dash-chip flat">→</span>
+                <span>most recent change</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Search bar */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 14,
+            }}
+          >
+            <div className="input-wrap" style={{ flex: 1, maxWidth: 380 }}>
               <svg
-                width="13"
-                height="13"
+                className="input-icon"
+                width="14"
+                height="14"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2"
-                style={{ marginRight: 6, verticalAlign: "-1px" }}
               >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
               </svg>
-              New product
-            </button>
-          }
-        />
-      ) : (
-        <div className="card card-table-wrap" style={{ padding: 0 }}>
-          <table className="products-table">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th style={{ width: 130, textAlign: "right" }}>SKUs</th>
-                <th style={{ width: 180 }}>Created</th>
-                <th style={{ width: 60 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    <div className="prod-name">{p.name}</div>
-                    {p.description && (
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "var(--text-3)",
-                          marginTop: 3,
-                        }}
+              <input
+                className="input"
+                placeholder="Search products by name or SKU..."
+                style={{ width: "100%" }}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <div style={{ flex: 1 }} />
+            <div style={{ fontSize: 12.5, color: "var(--text-3)" }}>
+              <strong style={{ color: "var(--text)" }}>{num(filtered.length)}</strong>
+              {filtered.length !== items.length && (
+                <> of {num(items.length)}</>
+              )}{" "}
+              {filtered.length === 1 ? "product" : "products"}
+            </div>
+          </div>
+
+          {/* Table */}
+          {items.length === 0 ? (
+            <EmptyState
+              title="No products yet"
+              message="Create a product to group related SKUs together."
+              action={
+                <button className="btn btn-primary" onClick={openCreate}>
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    style={{ marginRight: 6, verticalAlign: "-1px" }}
+                  >
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  Add Product
+                </button>
+              }
+            />
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              title={`No products match "${search}"`}
+              message="Try a different search term."
+            />
+          ) : (
+            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+              <table className="products-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th style={{ width: 140 }}>SKU</th>
+                    {channels.map((c) => (
+                      <th
+                        key={c}
+                        style={{ width: 120, textAlign: "right" }}
                       >
-                        {p.description}
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    <span className="prod-sku">{p.skuIds.length}</span>
-                  </td>
-                  <td>
-                    <span style={{ color: "var(--text-2)" }}>
-                      {date(p.createdAt)}
-                    </span>
-                  </td>
-                  <td style={{ textAlign: "center" }}>
-                    <div
-                      className="prod-delete"
-                      title="Delete product"
-                      role="button"
-                      aria-label={`Delete ${p.name}`}
-                      onClick={() => confirmDelete(p)}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
-                        <path d="M10 11v6M14 11v6" />
-                      </svg>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                        {(CHANNEL_LABELS as Record<string, string>)[c] ?? c}
+                      </th>
+                    ))}
+                    <th style={{ width: 60 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((p) => (
+                    <tr key={p.id}>
+                      <td>
+                        <div className="prod-name">{p.name}</div>
+                        {p.description && (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "var(--text-3)",
+                              marginTop: 3,
+                            }}
+                          >
+                            {p.description}
+                          </div>
+                        )}
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "var(--text-3)",
+                            marginTop: 3,
+                            display: "flex",
+                            gap: 8,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {p.asin && (
+                            <span style={{ fontFamily: "var(--font-mono)" }}>
+                              ASIN: {p.asin}
+                            </span>
+                          )}
+                          {p.skuCount > 1 && (
+                            <span>{p.skuCount} linked SKUs</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <span className="prod-sku">{p.primarySku}</span>
+                      </td>
+                      {channels.map((c) => (
+                        <td key={c} style={{ textAlign: "right" }}>
+                          {p.channels[c]?.price != null ? (
+                            <span
+                              className="prod-price"
+                              title={`SKU ${p.channels[c].sku}`}
+                            >
+                              {money(p.channels[c].price)}
+                            </span>
+                          ) : (
+                            <span style={{ color: "var(--text-3)" }}>—</span>
+                          )}
+                        </td>
+                      ))}
+                      <td style={{ textAlign: "center" }}>
+                        <div
+                          className="prod-delete"
+                          title="Delete product"
+                          role="button"
+                          aria-label={`Delete ${p.name}`}
+                          onClick={() => confirmDelete(p)}
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+                            <path d="M10 11v6M14 11v6" />
+                          </svg>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
       <Modal

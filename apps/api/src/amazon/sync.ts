@@ -25,6 +25,7 @@ import { sql, jsonb } from "../db.js";
 import { logger } from "../logger.js";
 import { getAmazonProvider } from "./index.js";
 import { aggregateOrders } from "./salesAggregator.js";
+import { syncProductsFromSkus } from "./productsSync.js";
 
 /** Amazon listing status → our `skus.status` enum. */
 function mapStatus(amazon: string): string {
@@ -101,6 +102,21 @@ export async function syncListings(workspaceId: string): Promise<StageResult> {
         updated_at          = now()
     `;
     affected += chunk.length;
+  }
+
+  // Refresh the Products table from the new SKU set — groups SKUs by ASIN
+  // so the Products page picks up new listings without a manual click.
+  try {
+    const ps = await syncProductsFromSkus(workspaceId);
+    logger.info(
+      { workspaceId, ...ps },
+      "syncListings → products auto-regenerated",
+    );
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "syncListings: products auto-regen failed (non-fatal)",
+    );
   }
 
   logger.info({ workspaceId, affected }, "syncListings complete");
