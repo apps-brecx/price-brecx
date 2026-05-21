@@ -901,6 +901,11 @@ export function SKUs() {
                 sku: scheduleFor.sku,
                 title: scheduleFor.title,
                 price: scheduleFor.price,
+                asin: scheduleFor.asin,
+                imageUrl: scheduleFor.imageUrl,
+                channelStock: scheduleFor.stock,
+                fulfillmentChannel: scheduleFor.fulfillmentChannel,
+                status: scheduleFor.status,
               }
             : null
         }
