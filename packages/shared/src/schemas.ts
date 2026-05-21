@@ -357,6 +357,38 @@ export const buyboxAlertUpdateSchema = z
   .refine((b) => Object.keys(b).length > 0, { message: "No fields to update" });
 export type BuyboxAlertUpdateInput = z.infer<typeof buyboxAlertUpdateSchema>;
 
+/* ---------------------- Sales Alert ----------------------------- */
+
+/** Scheduled sales-alert email digest config (one per workspace). */
+export const salesAlertSchema = z.object({
+  enabled: z.boolean(),
+  sendTime: HHMM,
+  timezone: z.string(),
+  emails: z.array(z.string().email()),
+  /** 7d sales drop vs prior 7d window that triggers a "drop" alert (percent). */
+  thresholdDropPct: z.number().int().min(1).max(100),
+  /** Active SKU with no sales for ≥ N days → "stalled SKU" alert. */
+  thresholdZeroDays: z.number().int().min(1).max(365),
+  /** Days-of-supply (stock / daily-velocity) below this → "running out" alert. */
+  thresholdLowDays: z.number().int().min(1).max(365),
+  lastSentOn: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+});
+export type SalesAlert = z.infer<typeof salesAlertSchema>;
+
+export const salesAlertUpdateSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    sendTime: HHMM.optional(),
+    timezone: z.string().min(1).max(64).optional(),
+    emails: z.array(z.string().email()).max(20).optional(),
+    thresholdDropPct: z.number().int().min(1).max(100).optional(),
+    thresholdZeroDays: z.number().int().min(1).max(365).optional(),
+    thresholdLowDays: z.number().int().min(1).max(365).optional(),
+  })
+  .refine((b) => Object.keys(b).length > 0, { message: "No fields to update" });
+export type SalesAlertUpdateInput = z.infer<typeof salesAlertUpdateSchema>;
+
 /* -------------------------- Activity ---------------------------- */
 
 export const activitySchema = z.object({

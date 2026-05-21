@@ -27,7 +27,11 @@
       "Bash(pnpm --filter @fbm/web run typecheck)",
       "Bash(pnpm db:migrate)",
       "Bash(npx tsx *)",
-      "Bash(Select-Object Name)"
+      "Bash(Select-Object Name)",
+      "Bash(psql --version)",
+      "Bash(pnpm --filter @fbm/api exec tsc --noEmit)",
+      "Bash(pnpm --filter @fbm/web exec tsc --noEmit)",
+      "Bash(pnpm --filter @fbm/shared build)"
     ]
   }
 }

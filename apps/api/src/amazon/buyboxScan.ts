@@ -224,6 +224,45 @@ export async function runLostBuyboxScan(
       };
     });
 
+  // Backfill title + image for rows where the merchant listings report didn't
+  // give us either (common for bundles / inactive SKUs). Catalog Items API is
+  // the seller-agnostic source — it returns the public Amazon product data.
+  const needCatalog = rows.filter(
+    (r) =>
+      !r.imageUrl ||
+      !r.productName ||
+      // listings fell back to the SKU when item-name was blank
+      (r.sellerSku && r.productName === r.sellerSku) ||
+      r.skus.includes(r.productName ?? ""),
+  );
+  if (needCatalog.length > 0) {
+    onProgress({
+      phase: "analyze",
+      message: `Enriching ${needCatalog.length} ASINs from Catalog Items…`,
+      total: needCatalog.length,
+    });
+    try {
+      const catalog = await amazon.getCatalogSummariesByAsin(
+        needCatalog.map((r) => r.asin.toUpperCase()),
+      );
+      for (const r of rows) {
+        const c = catalog.get(r.asin.toUpperCase());
+        if (!c) continue;
+        if (c.itemName && (!r.productName || r.productName === r.sellerSku || r.skus.includes(r.productName))) {
+          r.productName = c.itemName;
+        }
+        if (c.imageUrl && !r.imageUrl) {
+          r.imageUrl = c.imageUrl;
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        "Catalog enrichment skipped",
+      );
+    }
+  }
+
   const erroredAsins = allRows
     .filter((r) => r.reason === "api_error")
     .map((r) => r.asin);

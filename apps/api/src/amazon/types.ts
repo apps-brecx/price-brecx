@@ -90,6 +90,13 @@ export interface AmazonProvider {
     fnSku: string | null;
     itemName: string | null;
   }>;
+  /** Catalog Items API v2022-04-01 batch lookup by ASIN. Returns the public
+   *  product title + main image — used as a fallback when the seller's own
+   *  Listings entry has no item-name / image (e.g. bundles, inactive SKUs).
+   *  SP-API hard cap is 20 ASINs per call. */
+  getCatalogSummariesByAsin(asins: string[]): Promise<
+    Map<string, { itemName: string | null; imageUrl: string | null }>
+  >;
 }
 
 export interface FbaQty {

@@ -174,6 +174,157 @@ export function buyBoxLossEmailText(opts: {
     .join("\n");
 }
 
+interface SalesAlertRowForEmail {
+  sku: string;
+  asin: string | null;
+  reason: "drop" | "stall" | "lowdos";
+  stock: number;
+  sales7d: number;
+  sales30d: number;
+  daysOfSupply: number | null;
+  message: string;
+}
+
+const SALES_REASON_LABEL: Record<string, string> = {
+  drop: "Sales drop",
+  stall: "No recent sales",
+  lowdos: "Low days of supply",
+};
+
+/**
+ * Sales-alert digest email. Same card/header look as buyBoxLossEmailHtml so
+ * recipients recognize Priceobo email style.
+ */
+export function salesAlertEmailHtml(opts: {
+  rows: SalesAlertRowForEmail[];
+  reportUrl: string;
+  scannedAt?: string | null;
+}): string {
+  const { rows, reportUrl, scannedAt } = opts;
+  const scannedLabel = scannedAt
+    ? new Date(scannedAt).toLocaleString("en-US", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : null;
+  const top = rows.slice(0, 15);
+  const bodyRows = top
+    .map(
+      (r) => `
+      <tr>
+        <td style="padding:9px 12px;border-bottom:1px solid #f0f1f3;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:600;color:#111827;">${escapeHtml(
+          r.sku,
+        )}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f0f1f3;font-size:12px;color:#6b7280;">${escapeHtml(
+          r.asin ?? "—",
+        )}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f0f1f3;font-size:12px;color:#111827;font-weight:600;">${escapeHtml(
+          SALES_REASON_LABEL[r.reason] ?? r.reason,
+        )}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f0f1f3;font-size:12px;color:#374151;">${escapeHtml(
+          r.message,
+        )}</td>
+      </tr>`,
+    )
+    .join("");
+
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">
+      ${rows.length} sales alert${rows.length === 1 ? "" : "s"} on Priceobo.
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e6e8eb;">
+            <tr>
+              <td style="background:#4f46e5;padding:24px 32px;">
+                <span style="color:#ffffff;font-size:18px;font-weight:700;">Priceobo</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px;">
+                <h1 style="margin:0 0 8px;font-size:20px;color:#111827;">Sales alert digest</h1>
+                <p style="margin:0 0 6px;font-size:14px;line-height:1.6;color:#374151;">
+                  <strong>${rows.length}</strong> SKU${rows.length === 1 ? "" : "s"} matched your sales-alert thresholds today.
+                </p>
+                ${
+                  scannedLabel
+                    ? `<p style="margin:0 0 20px;font-size:12px;color:#9ca3af;">Evaluated · ${escapeHtml(
+                        scannedLabel,
+                      )}</p>`
+                    : `<div style="height:14px;"></div>`
+                }
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e6e8eb;border-radius:8px;overflow:hidden;border-collapse:separate;">
+                  <thead>
+                    <tr style="background:#f9fafb;">
+                      <th style="padding:9px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:600;border-bottom:1px solid #e6e8eb;">SKU</th>
+                      <th style="padding:9px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:600;border-bottom:1px solid #e6e8eb;">ASIN</th>
+                      <th style="padding:9px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:600;border-bottom:1px solid #e6e8eb;">Trigger</th>
+                      <th style="padding:9px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:600;border-bottom:1px solid #e6e8eb;">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody>${bodyRows}</tbody>
+                </table>
+                ${
+                  rows.length > 15
+                    ? `<p style="margin:12px 0 0;font-size:12px;color:#9ca3af;">+ ${
+                        rows.length - 15
+                      } more in the report</p>`
+                    : ""
+                }
+                <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:24px;">
+                  <tr>
+                    <td style="border-radius:8px;background:#4f46e5;">
+                      <a href="${reportUrl}" style="display:inline-block;padding:12px 28px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">
+                        Open Sales Alerts
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 32px;background:#f9fafb;border-top:1px solid #e6e8eb;">
+                <p style="margin:0;font-size:11px;color:#9ca3af;">
+                  You're receiving this because Sales Alerts are enabled for your workspace. Manage the schedule and thresholds in Priceobo → Sales Alert.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+/** Plain-text counterpart of {@link salesAlertEmailHtml}. */
+export function salesAlertEmailText(opts: {
+  rows: SalesAlertRowForEmail[];
+  reportUrl: string;
+}): string {
+  const { rows, reportUrl } = opts;
+  return [
+    `Sales alerts — ${rows.length} SKU${rows.length === 1 ? "" : "s"}`,
+    "",
+    ...rows
+      .slice(0, 30)
+      .map(
+        (r) =>
+          `- ${r.sku} (${SALES_REASON_LABEL[r.reason] ?? r.reason}): ${r.message}`,
+      ),
+    rows.length > 30 ? `…and ${rows.length - 30} more` : "",
+    "",
+    `Open the report: ${reportUrl}`,
+    "",
+    "— Priceobo",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function inviteEmailHtml(opts: {
   workspaceName: string;
   inviterName: string;

@@ -25,6 +25,7 @@ import automationRoutes from "./routes/automation.js";
 import alertRoutes from "./routes/alerts.js";
 import lostBuyboxRoutes from "./routes/lostBuybox.js";
 import buyboxAlertRoutes from "./routes/buyboxAlert.js";
+import salesAlertRoutes from "./routes/salesAlert.js";
 import notificationRuleRoutes from "./routes/notificationRules.js";
 import activityRoutes from "./routes/activity.js";
 import historyRoutes from "./routes/history.js";
@@ -78,6 +79,7 @@ const api: FastifyPluginAsync = async (instance: FastifyInstance) => {
   await instance.register(alertRoutes);
   await instance.register(lostBuyboxRoutes);
   await instance.register(buyboxAlertRoutes);
+  await instance.register(salesAlertRoutes);
   await instance.register(notificationRuleRoutes);
   await instance.register(activityRoutes);
   await instance.register(historyRoutes);

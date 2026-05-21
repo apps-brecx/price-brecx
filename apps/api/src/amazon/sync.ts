@@ -130,8 +130,10 @@ export async function syncImages(workspaceId: string): Promise<StageResult> {
   // Listings Items API returns the proper itemName). Includes inactive SKUs
   // so the Lost Buy Box page can show images for ASINs we're not currently
   // winning — those rows often correspond to inactive listings.
-  const targets = await sql<{ id: string; sku: string; title: string }[]>`
-    select id, sku, title from skus
+  const targets = await sql<
+    { id: string; sku: string; asin: string | null; title: string }[]
+  >`
+    select id, sku, asin, title from skus
     where workspace_id = ${workspaceId}
       and (image_url is null or title = sku or title is null or title = '')
   `;
@@ -188,6 +190,50 @@ export async function syncImages(workspaceId: string): Promise<StageResult> {
       );
     }
     await new Promise((r) => setTimeout(r, IMAGE_PACE_MS));
+  }
+
+  // Second pass — anything still missing title / image, look up by ASIN via
+  // Catalog Items v2022-04-01 (batched 20). This catches bundles / inactive
+  // listings the Listings Items API returned 404 on.
+  const stillMissing = await sql<
+    { id: string; asin: string | null; title: string; sku: string }[]
+  >`
+    select id, asin, title, sku from skus
+    where workspace_id = ${workspaceId}
+      and asin is not null
+      and (image_url is null or title = sku or title is null or title = '')
+  `;
+  const withAsin = stillMissing.filter((r) => r.asin);
+  if (withAsin.length > 0) {
+    logger.info(
+      `   🖼  catalog fallback for ${withAsin.length} ASINs (still missing title/image)…`,
+    );
+    try {
+      const map = await amazon.getCatalogSummariesByAsin(
+        withAsin.map((r) => r.asin!.toUpperCase()),
+      );
+      for (const r of withAsin) {
+        const c = map.get((r.asin ?? "").toUpperCase());
+        if (!c) continue;
+        const titleUpdate =
+          c.itemName && (r.title === r.sku || !r.title) ? c.itemName : null;
+        if (c.imageUrl || titleUpdate) {
+          await sql`
+            update skus set
+              image_url = coalesce(${c.imageUrl}, image_url),
+              title     = coalesce(${titleUpdate}, title),
+              updated_at = now()
+            where id = ${r.id}
+          `;
+          affected += 1;
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        "syncImages: catalog fallback failed",
+      );
+    }
   }
 
   logger.info({ workspaceId, affected }, "syncImages complete");

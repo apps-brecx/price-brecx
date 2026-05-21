@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { ignoreCreateSchema, type LostBuyboxRun } from "@fbm/shared";
+import {
+  ignoreCreateSchema,
+  type LostBuyboxRow,
+  type LostBuyboxRun,
+} from "@fbm/shared";
 import { sql } from "../db.js";
 import { enqueueLostBuyboxScan } from "../jobs.js";
 import { requestCancel } from "../amazon/scanControl.js";
@@ -49,7 +53,40 @@ export default async function lostBuyboxRoutes(app: FastifyInstance) {
         updatedAt: null,
       };
     }
-    return run as LostBuyboxRun;
+
+    // The merchant listings report's `item-name` is sometimes blank — the
+    // ingester then falls back to the SKU, which leaks into the UI as the
+    // product name. Re-join against `skus` (populated by the listings/catalog
+    // sync) so the snapshot picks up a real title where we have one.
+    const rows = (run.rows as LostBuyboxRow[]) ?? [];
+    if (rows.length > 0) {
+      const asins = [...new Set(rows.map((r) => r.asin).filter(Boolean))];
+      const skuLookup = await sql<
+        { asin: string; title: string; imageUrl: string | null }[]
+      >`
+        select distinct on (asin)
+               asin, title, image_url as "imageUrl"
+          from skus
+         where workspace_id = ${req.user!.workspaceId}
+           and asin = any(${asins})
+           and title is not null and title <> '' and title <> sku
+         order by asin, updated_at desc
+      `;
+      const byAsin = new Map(skuLookup.map((r) => [r.asin, r]));
+      for (const r of rows) {
+        const better = byAsin.get(r.asin);
+        if (!better) continue;
+        const looksLikeFallback =
+          !r.productName ||
+          r.productName === r.asin ||
+          (r.skus ?? []).includes(r.productName) ||
+          r.productName === r.sellerSku;
+        if (looksLikeFallback) r.productName = better.title;
+        if (!r.imageUrl && better.imageUrl) r.imageUrl = better.imageUrl;
+      }
+    }
+
+    return { ...run, rows } as LostBuyboxRun;
   });
 
   /**

@@ -68,6 +68,7 @@ export function useRealtime(): void {
             qc.invalidateQueries({ queryKey: ["nav-counts"] });
             qc.invalidateQueries({ queryKey: ["dashboard"] });
             qc.invalidateQueries({ queryKey: ["activity"] });
+            qc.invalidateQueries({ queryKey: ["inventory"] });
             if (msg.ok === false) {
               toast.error(
                 msg.stage ? `${msg.stage} sync failed` : "Amazon sync failed",
@@ -98,6 +99,15 @@ export function useRealtime(): void {
               );
             } else {
               toast.success(`Synced ${msg.count} SKUs from Amazon`);
+            }
+          } else if (msg.type === "sales_alerts_evaluated") {
+            qc.invalidateQueries({ queryKey: ["alerts", "sales"] });
+            qc.invalidateQueries({ queryKey: ["nav-counts"] });
+            if (msg.count > 0) {
+              toast.warning(
+                `${msg.count} new sales alert${msg.count === 1 ? "" : "s"}`,
+                "Open Sales Alert for details.",
+              );
             }
           }
         } catch {

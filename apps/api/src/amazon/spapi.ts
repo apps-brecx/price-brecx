@@ -135,6 +135,105 @@ export class SpapiProvider implements AmazonProvider {
     return res.data;
   }
 
+  /**
+   * Catalog Items API v2022-04-01 — batch lookup by ASIN. Hard cap is 20 per
+   * call. Returns the public catalog `itemName` + MAIN image link (which is
+   * what we fall back to when the seller's own listing has no title/image).
+   * 429 → exponential backoff (max 3 attempts). Bad ASINs are silently skipped.
+   */
+  async getCatalogSummariesByAsin(
+    asins: string[],
+  ): Promise<
+    Map<string, { itemName: string | null; imageUrl: string | null }>
+  > {
+    const out = new Map<
+      string,
+      { itemName: string | null; imageUrl: string | null }
+    >();
+    if (asins.length === 0) return out;
+    const unique = [...new Set(asins.filter(Boolean))];
+    const chunks: string[][] = [];
+    for (let i = 0; i < unique.length; i += 20) {
+      chunks.push(unique.slice(i, i + 20));
+    }
+    for (const chunk of chunks) {
+      for (let attempt = 0; attempt <= 2; attempt++) {
+        const token = await this.getAccessToken();
+        let res;
+        try {
+          res = await axios.get(
+            `${this.creds.endpoint}/catalog/2022-04-01/items`,
+            {
+              headers: { "x-amz-access-token": token },
+              params: {
+                identifiers: chunk.join(","),
+                identifiersType: "ASIN",
+                marketplaceIds: this.creds.marketplaceId,
+                includedData: "summaries,images",
+              },
+              timeout: 15_000,
+              validateStatus: () => true,
+            },
+          );
+        } catch (err) {
+          if (attempt === 2) {
+            logger.warn(
+              { err: err instanceof Error ? err.message : String(err) },
+              "Catalog summaries batch failed",
+            );
+            break;
+          }
+          await this.wait(1_000 * (attempt + 1));
+          continue;
+        }
+        if (res.status === 429 && attempt < 2) {
+          await this.wait(2_000 * (attempt + 1) + Math.random() * 500);
+          continue;
+        }
+        if (res.status >= 300) {
+          logger.warn(
+            { status: res.status, body: JSON.stringify(res.data).slice(0, 200) },
+            "Catalog summaries batch non-2xx",
+          );
+          break;
+        }
+        // Response shape: { items: [{ asin, summaries:[{ itemName }], images:[{ images:[{ variant, link }] }] }] }
+        const items = (res.data?.items ?? []) as Array<{
+          asin?: string;
+          summaries?: Array<{ itemName?: string; marketplaceId?: string }>;
+          images?: Array<{
+            marketplaceId?: string;
+            images?: Array<{ variant?: string; link?: string }>;
+          }>;
+        }>;
+        for (const it of items) {
+          const asin = (it.asin ?? "").toUpperCase();
+          if (!asin) continue;
+          // Prefer the marketplace-matching summary; fall back to the first.
+          const summary =
+            it.summaries?.find(
+              (s) => s.marketplaceId === this.creds.marketplaceId,
+            ) ?? it.summaries?.[0];
+          const imgGroup =
+            it.images?.find(
+              (i) => i.marketplaceId === this.creds.marketplaceId,
+            ) ?? it.images?.[0];
+          const main =
+            imgGroup?.images?.find((i) => i.variant === "MAIN") ??
+            imgGroup?.images?.[0];
+          out.set(asin, {
+            itemName: summary?.itemName ?? null,
+            imageUrl: main?.link ?? null,
+          });
+        }
+        break;
+      }
+      // light pacing so we don't trip the burst limit when we have many chunks
+      await this.wait(400);
+    }
+    return out;
+  }
+
   private authHeaders(token: string) {
     return { "x-amz-access-token": token, "content-type": "application/json" };
   }
@@ -584,7 +683,7 @@ function parseListingsTsv(tsv: string): ListingRow[] {
     rows.push({
       sku,
       asin: (c[iAsin] ?? "").trim() || null,
-      title: (c[iName] ?? "").trim() || sku,
+      title: (c[iName] ?? "").trim() || sku, // sku is the fallback when the report omits item-name; enrichment passes prefer the real Catalog title.
       price: price != null && !Number.isNaN(price) ? price : null,
       quantity: Math.trunc(Number((c[iQty] ?? "0").trim())) || 0,
       imageUrl: (c[iImg] ?? "").trim() || null,

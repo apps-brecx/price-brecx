@@ -22,7 +22,10 @@ import { sendMail } from "./mailer.js";
 import {
   buyBoxLossEmailHtml,
   buyBoxLossEmailText,
+  salesAlertEmailHtml,
+  salesAlertEmailText,
 } from "./lib/emailTemplates.js";
+import { evaluateSalesAlerts } from "./amazon/salesAlertEval.js";
 import { broadcast } from "./ws.js";
 import type { LostBuyboxRow } from "@fbm/shared";
 
@@ -55,6 +58,8 @@ export const LOST_BUYBOX_SCAN_QUEUE = "lost-buybox-scan";
 export const LOST_BUYBOX_CRON_QUEUE = "lost-buybox-cron";
 /** Every 15 min: sends the Buy Box loss digest at each workspace's chosen time. */
 export const BUYBOX_ALERT_DIGEST_QUEUE = "buybox-alert-digest";
+/** Every 15 min: evaluates sales-alert triggers + sends digest at chosen time. */
+export const SALES_ALERT_DIGEST_QUEUE = "sales-alert-digest";
 
 /* ----- Legacy-style 4-stage daily SKUs sync (Asia/Dhaka timings) ----- */
 export const LISTINGS_SYNC_QUEUE = "listings-sync";          // per-workspace stage worker
@@ -481,6 +486,129 @@ export async function startJobs(): Promise<void> {
     }
   });
   await boss.schedule(BUYBOX_ALERT_DIGEST_QUEUE, "*/15 * * * *");
+
+  // ---- Sales-alert digest: evaluate triggers + email at chosen time ----
+  await boss.createQueue(SALES_ALERT_DIGEST_QUEUE);
+  await boss.work(SALES_ALERT_DIGEST_QUEUE, async () => {
+    const settings = await sql<
+      {
+        workspaceId: string;
+        sendTime: string;
+        timezone: string;
+        emails: string[];
+        thresholdDropPct: number;
+        thresholdZeroDays: number;
+        thresholdLowDays: number;
+        lastSentOn: string | null;
+      }[]
+    >`
+      select workspace_id as "workspaceId", send_time as "sendTime",
+             timezone, emails,
+             threshold_drop_pct as "thresholdDropPct",
+             threshold_zero_days as "thresholdZeroDays",
+             threshold_low_days as "thresholdLowDays",
+             last_sent_on as "lastSentOn"
+        from sales_alert_settings
+       where enabled = true
+    `;
+    for (const s of settings) {
+      const { date, hm } = localParts(s.timezone);
+      if (s.lastSentOn === date) continue;
+      if (hm < s.sendTime) continue;
+
+      try {
+        const items = await evaluateSalesAlerts(s.workspaceId, {
+          thresholdDropPct: s.thresholdDropPct,
+          thresholdZeroDays: s.thresholdZeroDays,
+          thresholdLowDays: s.thresholdLowDays,
+        });
+
+        // De-dupe today's alerts: only insert (workspace, sku_id, reason) we
+        // haven't already created for the same kind today, so re-runs in the
+        // same day don't pile rows up if the cron retries.
+        if (items.length > 0) {
+          const rows = items.map((a) => ({
+            workspace_id: s.workspaceId,
+            kind: "sales",
+            sku_id: a.skuId,
+            title: a.title_full,
+            message: a.message,
+            severity: a.severity,
+          }));
+          await sql`
+            insert into alerts ${sql(
+              rows,
+              "workspace_id",
+              "kind",
+              "sku_id",
+              "title",
+              "message",
+              "severity",
+            )}
+          `;
+        }
+
+        const emails = s.emails ?? [];
+        if (items.length > 0 && emails.length > 0) {
+          const reportUrl = `${appUrl}/sales`;
+          await sendMail({
+            to: emails,
+            subject: `[Sales] ${items.length} alert${
+              items.length === 1 ? "" : "s"
+            } for your SKUs`,
+            html: salesAlertEmailHtml({
+              rows: items.map((a) => ({
+                sku: a.sku,
+                asin: a.asin,
+                reason: a.reason,
+                stock: a.stock,
+                sales7d: a.sales7d,
+                sales30d: a.sales30d,
+                daysOfSupply: a.daysOfSupply,
+                message: a.message,
+              })),
+              reportUrl,
+              scannedAt: new Date().toISOString(),
+            }),
+            text: salesAlertEmailText({
+              rows: items.map((a) => ({
+                sku: a.sku,
+                asin: a.asin,
+                reason: a.reason,
+                stock: a.stock,
+                sales7d: a.sales7d,
+                sales30d: a.sales30d,
+                daysOfSupply: a.daysOfSupply,
+                message: a.message,
+              })),
+              reportUrl,
+            }),
+          }).catch((err) =>
+            logger.error({ err }, "Sales-alert digest email failed"),
+          );
+        }
+
+        if (items.length > 0) {
+          broadcast(s.workspaceId, {
+            type: "sales_alerts_evaluated",
+            count: items.length,
+          });
+        }
+
+        await sql`
+          update sales_alert_settings
+             set last_sent_on = ${date}, updated_at = now()
+           where workspace_id = ${s.workspaceId}
+        `;
+      } catch (err) {
+        logger.error(
+          { err, workspaceId: s.workspaceId },
+          "sales-alert evaluation failed",
+        );
+      }
+    }
+  });
+  await boss.schedule(SALES_ALERT_DIGEST_QUEUE, "*/15 * * * *");
 
   // ---- Legacy-style 4-stage daily SKUs sync (Asia/Dhaka) ----
   //   8:00  listings (merchant listings report → title/asin/price/qty)

@@ -62,4 +62,10 @@ export class StubAmazonProvider implements AmazonProvider {
   }> {
     return { imageUrl: null, fnSku: null, itemName: null };
   }
+
+  async getCatalogSummariesByAsin(): Promise<
+    Map<string, { itemName: string | null; imageUrl: string | null }>
+  > {
+    return new Map();
+  }
 }
