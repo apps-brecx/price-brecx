@@ -1,8 +1,17 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { priceScheduleCreateSchema, type TimeSlot } from "@fbm/shared";
 import { sql, jsonb } from "../db.js";
 import { recordActivity } from "../lib/activity.js";
 import { scheduleApplyPrice } from "../jobs.js";
+import { getAmazonProvider } from "../amazon/index.js";
+
+const salePriceSchema = z.object({
+  skuId: z.string().uuid(),
+  value: z.number().positive(),
+  startDate: z.string(),
+  endDate: z.string(),
+});
 
 const cols = sql`
   ps.id, ps.sku_id as "skuId", s.sku, s.title,
@@ -67,19 +76,25 @@ export default async function scheduleRoutes(app: FastifyInstance) {
       }
     }
 
+    // CTE-wrapped insert so we can return joined SKU columns (sku, title).
+    // Bare INSERT ... RETURNING can't reference the `skus` table.
     const [row] = await sql`
-      insert into price_schedules
-        (workspace_id, sku_id, type, status, price, current_price,
-         start_date, end_date, until_changed,
-         time_slots, timezone, created_by)
-      values (
-        ${wsId}, ${body.skuId}, ${body.type}, 'scheduled',
-        ${body.price}, ${body.currentPrice},
-        ${body.startDate ?? null}, ${body.endDate ?? null},
-        ${body.untilChanged ?? false},
-        ${jsonb(body.timeSlots)}, ${body.timezone}, ${req.user!.email}
+      with ins as (
+        insert into price_schedules
+          (workspace_id, sku_id, type, status, price, current_price,
+           start_date, end_date, until_changed,
+           time_slots, timezone, created_by)
+        values (
+          ${wsId}, ${body.skuId}, ${body.type}, 'scheduled',
+          ${body.price}, ${body.currentPrice},
+          ${body.startDate ?? null}, ${body.endDate ?? null},
+          ${body.untilChanged ?? false},
+          ${jsonb(body.timeSlots)}, ${body.timezone}, ${req.user!.email}
+        )
+        returning *
       )
-      returning ${cols}
+      select ${cols} from ins ps
+      join skus s on s.id = ps.sku_id
     `;
 
     // Single-shot: queue one apply + (optionally) one revert via pg-boss
@@ -128,6 +143,60 @@ export default async function scheduleRoutes(app: FastifyInstance) {
             })`,
     });
     return reply.code(201).send(row);
+  });
+
+  /**
+   * Sale Price — pushes an Amazon Deal pricing window straight to SP-API.
+   * Amazon enforces start/end on its side; we don't queue a revert job.
+   * Mirrors the legacy `PATCH /sale-price` endpoint.
+   */
+  app.post("/sale-price", async (req, reply) => {
+    const body = salePriceSchema.parse(req.body);
+    const wsId = req.user!.workspaceId;
+    if (new Date(body.endDate) <= new Date(body.startDate)) {
+      return reply.code(400).send({ error: "endDate must be after startDate" });
+    }
+    const [skuRow] = await sql<{ id: string; sku: string; price: number }[]>`
+      select id, sku, price::float8 as price from skus
+      where id = ${body.skuId} and workspace_id = ${wsId}
+    `;
+    if (!skuRow) return reply.code(404).send({ error: "SKU not found" });
+    if (body.value >= skuRow.price) {
+      return reply.code(400).send({
+        error: `Sale price must be lower than the regular price ($${skuRow.price.toFixed(2)})`,
+      });
+    }
+    const amazon = getAmazonProvider();
+    const res = await amazon.updateSalePrice(
+      skuRow.sku,
+      body.value,
+      body.startDate,
+      body.endDate,
+    );
+    await recordActivity({
+      workspaceId: wsId,
+      actor: req.user!.email,
+      action: "updated",
+      entityType: "price_schedule",
+      entityId: null,
+      summary: `Sale price ${skuRow.sku} → $${body.value.toFixed(2)} (${new Date(
+        body.startDate,
+      ).toLocaleDateString()} → ${new Date(body.endDate).toLocaleDateString()})`,
+      meta: {
+        kind: "sale_price",
+        ok: res.ok,
+        value: body.value,
+        startDate: body.startDate,
+        endDate: body.endDate,
+      },
+    });
+    if (!res.ok) {
+      return reply.code(502).send({
+        error: "Amazon rejected the sale price patch",
+        detail: res.detail,
+      });
+    }
+    return { ok: true };
   });
 
   app.delete("/schedules/:id", async (req, reply) => {

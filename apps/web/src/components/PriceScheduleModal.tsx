@@ -101,6 +101,10 @@ export function PriceScheduleModal({
   const [weekly, setWeekly] = useState<Record<number, WMSlot[]>>({});
   // Monthly: date 1..31 → list of slots
   const [monthly, setMonthly] = useState<Record<number, WMSlot[]>>({});
+  // Sale Price (Amazon Deal)
+  const [saleStart, setSaleStart] = useState("");
+  const [saleEnd, setSaleEnd] = useState("");
+  const [salePrice, setSalePrice] = useState("");
   const [timezone, setTimezone] = useState(browserTz);
   const [err, setErr] = useState<string | null>(null);
 
@@ -111,6 +115,9 @@ export function PriceScheduleModal({
     setSingleSlots([emptySingle(sku.price)]);
     setWeekly({});
     setMonthly({});
+    setSaleStart("");
+    setSaleEnd("");
+    setSalePrice("");
     setErr(null);
     setTimezone(browserTz);
   }, [open, sku]);
@@ -135,6 +142,22 @@ export function PriceScheduleModal({
     },
     onError: (e) =>
       setErr(e instanceof Error ? e.message : "Failed to create schedule."),
+  });
+
+  const salePriceMut = useMutation({
+    mutationFn: (body: {
+      skuId: string;
+      value: number;
+      startDate: string;
+      endDate: string;
+    }) => api.post<{ ok: boolean }>("/sale-price", body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["skus"] });
+      toast.success("Sale price scheduled on Amazon");
+      onClose();
+    },
+    onError: (e) =>
+      setErr(e instanceof Error ? e.message : "Failed to set sale price."),
   });
 
   const deleteMut = useMutation({
@@ -295,8 +318,30 @@ export function PriceScheduleModal({
       return;
     }
 
-    // Sale tab — not implemented yet; surface as a friendly message.
-    setErr("Sale Price is not available yet — coming in a follow-up.");
+    if (tab === "sale") {
+      const value = Number(salePrice);
+      if (!salePrice || !Number.isFinite(value) || value <= 0) {
+        return setErr("Sale price: enter a valid amount.");
+      }
+      if (value >= sku.price) {
+        return setErr(
+          `Sale price must be lower than the regular price (${money(sku.price)}).`,
+        );
+      }
+      if (!saleStart || !saleEnd) {
+        return setErr("Sale price: pick both start and end dates.");
+      }
+      if (new Date(saleEnd) <= new Date(saleStart)) {
+        return setErr("Sale price: end must be after start.");
+      }
+      await salePriceMut.mutateAsync({
+        skuId: sku.id,
+        value,
+        startDate: new Date(saleStart).toISOString(),
+        endDate: new Date(saleEnd).toISOString(),
+      });
+      return;
+    }
   }
 
   if (!open) return null;
@@ -312,14 +357,17 @@ export function PriceScheduleModal({
           <button className="btn btn-secondary" onClick={onClose}>
             Cancel
           </button>
-          {tab !== "sale" && (
-            <button
-              className="btn btn-primary"
-              disabled={createMut.isPending || !sku}
-              onClick={submit}
-            >
-              {createMut.isPending
-                ? "Saving…"
+          <button
+            className="btn btn-primary"
+            disabled={
+              createMut.isPending || salePriceMut.isPending || !sku
+            }
+            onClick={submit}
+          >
+            {createMut.isPending || salePriceMut.isPending
+              ? "Saving…"
+              : tab === "sale"
+                ? "Set sale price"
                 : tab === "weekly"
                   ? "Save weekly schedule"
                   : tab === "monthly"
@@ -327,8 +375,7 @@ export function PriceScheduleModal({
                     : singleSlots.length > 1
                       ? `Save ${singleSlots.length} schedules`
                       : "Save schedule"}
-            </button>
-          )}
+          </button>
         </>
       }
     >
@@ -546,9 +593,68 @@ export function PriceScheduleModal({
       {tab === "sale" && (
         <div className="psm-pane">
           <div className="psm-help">
-            Sale Price (Amazon Deal pricing) is not wired up yet. Use the Single
-            tab to set a temporary lower price with start/end times for similar
-            behaviour.
+            Amazon Deal pricing — Amazon enforces the start/end window on its
+            side. The listing shows a strike-through regular price and the
+            discounted sale price during the window. No auto-revert job is
+            queued; Amazon handles it.
+          </div>
+          <div className="psm-sale-grid">
+            <div>
+              <div className="psm-field-label">
+                Sale Start <span className="req">*</span>
+              </div>
+              <input
+                type="datetime-local"
+                className="form-control"
+                value={saleStart}
+                onChange={(e) => setSaleStart(e.target.value)}
+              />
+            </div>
+            <div>
+              <div className="psm-field-label">
+                Sale End <span className="req">*</span>
+              </div>
+              <input
+                type="datetime-local"
+                className="form-control"
+                value={saleEnd}
+                onChange={(e) => setSaleEnd(e.target.value)}
+              />
+            </div>
+            <div>
+              <div className="psm-field-label">
+                Sale Price <span className="req">*</span>
+              </div>
+              <input
+                type="number"
+                className="form-control"
+                step="0.01"
+                min="0"
+                placeholder="$"
+                value={salePrice}
+                onChange={(e) => setSalePrice(e.target.value)}
+              />
+            </div>
+            <div>
+              <div className="psm-field-label">Regular Price</div>
+              <input
+                className="form-control"
+                value={sku ? money(sku.price) : ""}
+                disabled
+              />
+            </div>
+            <div>
+              <div className="psm-field-label">Discount %</div>
+              <input
+                className="form-control"
+                value={
+                  sku && salePrice && Number(salePrice) > 0 && sku.price > 0
+                    ? `${(((sku.price - Number(salePrice)) / sku.price) * 100).toFixed(1)}%`
+                    : "—"
+                }
+                disabled
+              />
+            </div>
           </div>
         </div>
       )}

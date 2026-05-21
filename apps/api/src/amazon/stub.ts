@@ -24,6 +24,22 @@ export class StubAmazonProvider implements AmazonProvider {
     return { ok: true, detail: { stub: true, sku, price } };
   }
 
+  async updateSalePrice(
+    sku: string,
+    value: number,
+    startDate: string,
+    endDate: string,
+  ) {
+    logger.warn(
+      { sku, value, startDate, endDate },
+      "Amazon SP-API not configured — sale price recorded locally only",
+    );
+    return {
+      ok: true,
+      detail: { stub: true, sku, value, startDate, endDate },
+    };
+  }
+
   async getOffer(sku: string): Promise<ProductOffer | null> {
     return { sku, asin: null, title: null, price: null, currency: "USD" };
   }

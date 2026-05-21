@@ -67,6 +67,15 @@ export interface AmazonProvider {
   readonly sellerId: string | null;
   /** Push a new price for a SKU to the marketplace. */
   updatePrice(sku: string, price: number): Promise<{ ok: boolean; detail?: unknown }>;
+  /** Amazon Deal pricing — sets a `discounted_price` window on the listing.
+   *  Different from `updatePrice`: Amazon enforces the start/end on its side
+   *  rather than us scheduling apply/revert jobs. */
+  updateSalePrice(
+    sku: string,
+    value: number,
+    startDate: string,
+    endDate: string,
+  ): Promise<{ ok: boolean; detail?: unknown }>;
   /** Fetch the current offer/pricing for a SKU. */
   getOffer(sku: string): Promise<ProductOffer | null>;
   /** Fetch catalog details for an ASIN. */

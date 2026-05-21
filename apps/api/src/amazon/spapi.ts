@@ -95,6 +95,68 @@ export class SpapiProvider implements AmazonProvider {
     }
   }
 
+  /**
+   * Amazon Deal pricing — patches `purchasable_offer.discounted_price` with a
+   * scheduled start/end window. Amazon enforces the window on its side, so we
+   * don't need a separate revert job. Ported from the legacy app's
+   * `updateProductSalePrice`.
+   */
+  async updateSalePrice(
+    sku: string,
+    value: number,
+    startDate: string,
+    endDate: string,
+  ) {
+    const token = await this.getAccessToken();
+    const url = `${this.creds.endpoint}/listings/2021-08-01/items/${
+      this.creds.sellerId
+    }/${encodeURIComponent(sku)}`;
+    try {
+      const res = await axios({
+        method: "PATCH",
+        url,
+        headers: {
+          "x-amz-access-token": token,
+          "content-type": "application/json",
+        },
+        params: { marketplaceIds: this.creds.marketplaceId },
+        data: {
+          productType: "PRODUCT",
+          patches: [
+            {
+              op: "replace",
+              path: "/attributes/purchasable_offer",
+              value: [
+                {
+                  marketplace_id: this.creds.marketplaceId,
+                  currency: "USD",
+                  discounted_price: [
+                    {
+                      schedule: [
+                        {
+                          start_at: new Date(startDate).toISOString(),
+                          end_at: new Date(endDate).toISOString(),
+                          value_with_tax: value.toFixed(2),
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      });
+      return { ok: true, detail: res.data };
+    } catch (err) {
+      logger.error({ err, sku }, "SP-API updateSalePrice failed");
+      return {
+        ok: false,
+        detail: axios.isAxiosError(err) ? err.response?.data : String(err),
+      };
+    }
+  }
+
   async getOffer(sku: string): Promise<ProductOffer | null> {
     const token = await this.getAccessToken();
     const url = `${this.creds.endpoint}/listings/2021-08-01/items/${

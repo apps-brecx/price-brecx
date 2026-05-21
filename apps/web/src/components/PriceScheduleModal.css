@@ -229,6 +229,23 @@
   border-color: var(--danger-fg);
 }
 
+/* Sale Price tab */
+.psm-sale-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.psm-field-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+.psm-field-label .req {
+  color: var(--danger-fg);
+  margin-left: 2px;
+}
+
 /* Existing schedules block */
 .psm-existing {
   margin-top: 18px;
