@@ -64,6 +64,10 @@ export function DateTimePicker({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // Flip the popover to the right-aligned side when the trigger is too
+  // close to the viewport's right edge (e.g. the Sale End field on the
+  // right column of the form). Decided once per open.
+  const [anchorRight, setAnchorRight] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Draft = the value the user is currently editing inside the popover.
@@ -76,6 +80,21 @@ export function DateTimePicker({
     setDraft(parsed);
     if (parsed) setViewMonth(parsed);
   }, [parsed]);
+
+  // Detect whether the popover would overflow the viewport on the right
+  // if it grows from the trigger's left edge — flip to right-aligned if so.
+  useEffect(() => {
+    if (!open) return;
+    const trigger = wrapRef.current?.querySelector<HTMLDivElement>(
+      ".drp-trigger",
+    );
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const POPOVER_W = 480; // matches .dtp-popover min-width
+    const GUTTER = 16; // breathing room from the viewport edge
+    const overflows = rect.left + POPOVER_W > window.innerWidth - GUTTER;
+    setAnchorRight(overflows);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -230,7 +249,11 @@ export function DateTimePicker({
       </div>
 
       {open && (
-        <div className="drp-popover dtp-popover">
+        <div
+          className={
+            "drp-popover dtp-popover" + (anchorRight ? " anchor-right" : "")
+          }
+        >
           <div className="dtp-cal">
             <div className="drp-pane-head dtp-head">
               <button

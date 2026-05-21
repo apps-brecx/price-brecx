@@ -21,11 +21,16 @@
     "footer footer";
   padding: 0;
   min-width: 480px;
-  /* Anchor to the trigger's left edge so the popover grows right (into the
-     drawer body's empty area) instead of left (into the page's gutter).
+  /* Anchor to the trigger's left edge by default (popover grows rightward).
      `!important` overrides the inherited `.drp-popover { right: 0 }`. */
   left: 0 !important;
   right: auto !important;
+}
+/* Flipped when the trigger is too close to the viewport's right edge —
+   anchor right so the popover grows leftward and stays on screen. */
+.dtp-popover.anchor-right {
+  left: auto !important;
+  right: 0 !important;
 }
 
 .dtp-cal {
