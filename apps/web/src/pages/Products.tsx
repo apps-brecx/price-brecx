@@ -6,9 +6,11 @@ import { api } from "../lib/api";
 import { money, num, relativeTime } from "../lib/format";
 import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
+import { PriceScheduleModal } from "../components/PriceScheduleModal";
 import { useToast } from "../components/Toast";
 
 interface ChannelPrice {
+  skuId: string;
   sku: string;
   price: number;
   basePrice: number | null;
@@ -61,6 +63,12 @@ export function Products() {
   const [createOpen, setCreateOpen] = useState(false);
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft);
   const [search, setSearch] = useState("");
+  const [scheduleFor, setScheduleFor] = useState<{
+    id: string;
+    sku: string;
+    title: string;
+    price: number;
+  } | null>(null);
 
   const query = useQuery({
     queryKey: ["products"],
@@ -470,20 +478,34 @@ export function Products() {
                       <td>
                         <span className="prod-sku">{p.primarySku}</span>
                       </td>
-                      {channels.map((c) => (
-                        <td key={c} style={{ textAlign: "right" }}>
-                          {p.channels[c]?.price != null ? (
-                            <span
-                              className="prod-price"
-                              title={`SKU ${p.channels[c].sku}`}
+                      {channels.map((c) => {
+                        const ch = p.channels[c];
+                        if (!ch?.price && ch?.price !== 0)
+                          return (
+                            <td key={c} style={{ textAlign: "right" }}>
+                              <span style={{ color: "var(--text-3)" }}>—</span>
+                            </td>
+                          );
+                        return (
+                          <td key={c} style={{ textAlign: "right" }}>
+                            <button
+                              type="button"
+                              className="prod-price prod-price-btn"
+                              title={`Click to schedule a price change · SKU ${ch.sku}`}
+                              onClick={() =>
+                                setScheduleFor({
+                                  id: ch.skuId,
+                                  sku: ch.sku,
+                                  title: p.name,
+                                  price: ch.price,
+                                })
+                              }
                             >
-                              {money(p.channels[c].price)}
-                            </span>
-                          ) : (
-                            <span style={{ color: "var(--text-3)" }}>—</span>
-                          )}
-                        </td>
-                      ))}
+                              {money(ch.price)}
+                            </button>
+                          </td>
+                        );
+                      })}
                       <td style={{ textAlign: "center" }}>
                         <div
                           className="prod-delete"
@@ -574,6 +596,12 @@ export function Products() {
           </div>
         )}
       </Modal>
+
+      <PriceScheduleModal
+        open={!!scheduleFor}
+        sku={scheduleFor}
+        onClose={() => setScheduleFor(null)}
+      />
     </div>
   );
 }

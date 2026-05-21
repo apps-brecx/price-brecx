@@ -44,6 +44,19 @@
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
+.products-table .prod-price-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all .12s;
+}
+.products-table .prod-price-btn:hover {
+  border-color: var(--brand-400);
+  color: var(--brand-700);
+  background: var(--brand-50);
+}
 .products-table .prod-delete {
   width: 28px; height: 28px;
   border-radius: 6px;

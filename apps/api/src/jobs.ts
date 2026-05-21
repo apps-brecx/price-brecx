@@ -52,6 +52,8 @@ function localParts(tz: string): { date: string; hm: string } {
 }
 
 export const APPLY_PRICE_QUEUE = "apply-price";
+/** Every minute: fires weekly/monthly schedule slots whose local time has come. */
+export const SCHEDULE_TICK_QUEUE = "schedule-tick";
 export const SYNC_AMAZON_QUEUE = "sync-amazon";
 export const LOST_BUYBOX_SCAN_QUEUE = "lost-buybox-scan";
 /** Hourly fan-out: enqueues a Lost Buy Box scan for every workspace. */
@@ -486,6 +488,68 @@ export async function startJobs(): Promise<void> {
     }
   });
   await boss.schedule(BUYBOX_ALERT_DIGEST_QUEUE, "*/15 * * * *");
+
+  // ---- Schedule tick: applies/reverts weekly + monthly slots when their
+  //      local time arrives. Single-shot schedules are handled by direct
+  //      pg-boss `startAfter` and don't need this tick.
+  await boss.createQueue(SCHEDULE_TICK_QUEUE);
+  await boss.work(SCHEDULE_TICK_QUEUE, async () => {
+    interface SchedRow {
+      id: string;
+      skuId: string;
+      sku: string;
+      type: "single" | "weekly" | "monthly";
+      timezone: string;
+      timeSlots: Array<{
+        day: number;
+        startTime: string;
+        endTime: string;
+        price: number;
+        revertPrice?: number;
+      }>;
+      workspaceId: string;
+    }
+    const rows = await sql<SchedRow[]>`
+      select ps.id, ps.sku_id as "skuId", s.sku, ps.type, ps.timezone,
+             ps.time_slots as "timeSlots", ps.workspace_id as "workspaceId"
+        from price_schedules ps
+        join skus s on s.id = ps.sku_id
+       where ps.status in ('scheduled','running')
+         and ps.type in ('weekly','monthly')
+    `;
+    for (const r of rows) {
+      const { date: localDate, hm } = localParts(r.timezone);
+      const weekday = new Date(`${localDate}T00:00:00Z`).getUTCDay(); // 0..6
+      const dayOfMonth = Number(localDate.slice(8, 10));
+      for (const slot of r.timeSlots) {
+        const matchesDay =
+          r.type === "weekly"
+            ? slot.day === weekday
+            : slot.day === dayOfMonth;
+        if (!matchesDay) continue;
+        if (slot.startTime === hm) {
+          await getBoss().send(APPLY_PRICE_QUEUE, {
+            scheduleId: r.id,
+            skuId: r.skuId,
+            sku: r.sku,
+            price: slot.price,
+            workspaceId: r.workspaceId,
+          } satisfies ApplyPriceJob);
+        }
+        if (slot.endTime === hm && slot.revertPrice != null) {
+          await getBoss().send(APPLY_PRICE_QUEUE, {
+            scheduleId: r.id,
+            skuId: r.skuId,
+            sku: r.sku,
+            price: slot.revertPrice,
+            isRevert: true,
+            workspaceId: r.workspaceId,
+          } satisfies ApplyPriceJob);
+        }
+      }
+    }
+  });
+  await boss.schedule(SCHEDULE_TICK_QUEUE, "* * * * *");
 
   // ---- Sales-alert digest: evaluate triggers + email at chosen time ----
   await boss.createQueue(SALES_ALERT_DIGEST_QUEUE);

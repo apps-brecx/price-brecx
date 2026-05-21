@@ -31,7 +31,9 @@
       "Bash(psql --version)",
       "Bash(pnpm --filter @fbm/api exec tsc --noEmit)",
       "Bash(pnpm --filter @fbm/web exec tsc --noEmit)",
-      "Bash(pnpm --filter @fbm/shared build)"
+      "Bash(pnpm --filter @fbm/shared build)",
+      "Bash(head -911 apps/web/src/pages/SKUs.tsx)",
+      "Bash(mv /tmp/skus_head.tsx apps/web/src/pages/SKUs.tsx)"
     ]
   }
 }

@@ -57,26 +57,61 @@ export default async function productRoutes(app: FastifyInstance) {
         `
       : [];
     const skuById = new Map(linked.map((s) => [s.id, s]));
+    // Reverse: an ASIN may also have its own SKUs not yet in any product —
+    // surface them so the channel cell can open a schedule modal without
+    // first auto-creating a product. Drives the "show channel even when not
+    // linked yet" case.
+    type LinkedSku = (typeof linked)[number];
+    const skusByAsin = new Map<string, LinkedSku[]>();
+    if (rawProducts.length > 0) {
+      const asins = rawProducts
+        .map((p) => p.asin)
+        .filter((a): a is string => !!a);
+      if (asins.length > 0) {
+        const extra = await sql<LinkedSku[]>`
+          select id, sku, asin, title, channel,
+                 price::float8 as price,
+                 base_price::float8 as "basePrice"
+            from skus
+           where workspace_id = ${wsId}
+             and asin = any(${asins})
+        `;
+        for (const r of extra) {
+          if (!r.asin) continue;
+          const arr = skusByAsin.get(r.asin) ?? [];
+          arr.push(r);
+          skusByAsin.set(r.asin, arr);
+        }
+      }
+    }
 
     const items = rawProducts.map((p) => {
-      const skus = p.skuIds
+      // Direct skuIds linkage + ASIN-shared SKUs (so the channel cell still
+      // resolves a SKU id even if the product's sku_ids hasn't been refreshed
+      // since the listing landed in another channel).
+      const direct = p.skuIds
         .map((id) => skuById.get(id))
-        .filter(Boolean) as (typeof linked)[number][];
-      // First SKU per channel — assumes one listing per marketplace per product.
+        .filter((v): v is LinkedSku => !!v);
+      const shared = p.asin ? (skusByAsin.get(p.asin) ?? []) : [];
+      const merged: LinkedSku[] = [...direct];
+      for (const r of shared) {
+        if (!merged.some((m) => m.id === r.id)) merged.push(r);
+      }
       const channels: Record<
         string,
-        { sku: string; price: number; basePrice: number | null }
+        { skuId: string; sku: string; price: number; basePrice: number | null }
       > = {};
-      for (const s of skus) {
+      for (const s of merged) {
         if (!channels[s.channel]) {
           channels[s.channel] = {
+            skuId: s.id,
             sku: s.sku,
             price: s.price,
             basePrice: s.basePrice,
           };
         }
       }
-      const primarySku = skus[0]?.sku ?? "—";
+      const primarySku = merged[0]?.sku ?? "—";
       return {
         id: p.id,
         name: p.name,
@@ -86,7 +121,7 @@ export default async function productRoutes(app: FastifyInstance) {
         createdAt: p.createdAt,
         updatedAt: p.updatedAt,
         primarySku,
-        skuCount: skus.length,
+        skuCount: merged.length,
         channels,
       };
     });

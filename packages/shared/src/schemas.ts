@@ -160,9 +160,13 @@ export type ProductCreateInput = z.infer<typeof productCreateSchema>;
 export const timeSlotSchema = z.object({
   /** 0=Sunday..6=Saturday for weekly, 1..31 for monthly */
   day: z.number().int(),
-  startTime: z.string(),
-  endTime: z.string(),
+  /** "HH:MM" 24-hour, interpreted in the schedule's `timezone`. */
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  /** Price applied at startTime. */
   price: z.number().positive(),
+  /** Price restored at endTime. Kept optional for single-shot legacy rows. */
+  revertPrice: z.number().positive().optional(),
 });
 export type TimeSlot = z.infer<typeof timeSlotSchema>;
 
@@ -177,6 +181,8 @@ export const priceScheduleSchema = z.object({
   currentPrice: z.number().positive(),
   startDate: z.string().nullable(),
   endDate: z.string().nullable(),
+  /** No auto-revert; new price holds until the user changes it manually. */
+  untilChanged: z.boolean().default(false),
   timeSlots: z.array(timeSlotSchema),
   timezone: z.string(),
   createdBy: z.string(),
@@ -191,6 +197,7 @@ export const priceScheduleCreateSchema = z.object({
   currentPrice: z.number().positive(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
+  untilChanged: z.boolean().default(false),
   timeSlots: z.array(timeSlotSchema).default([]),
   timezone: z.string().default("America/New_York"),
 });
