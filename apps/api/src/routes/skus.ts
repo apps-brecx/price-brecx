@@ -5,6 +5,31 @@ import { sql, jsonb } from "../db.js";
 import { recordActivity } from "../lib/activity.js";
 import { enqueueAmazonSync } from "../jobs.js";
 
+/**
+ * Multi-channel filter keys for the SKUs filter dropdown. "amazon-fba" and
+ * "amazon-fbm" both map to `channel='amazon'` and just narrow by
+ * `fulfillment_channel`. Anything else is a literal channel.
+ */
+const CHANNEL_KEYS = [
+  "amazon-fba",
+  "amazon-fbm",
+  "shopify",
+  "walmart",
+  "tiktok",
+  "ebay",
+  "etsy",
+  "faire",
+] as const;
+
+const STOCK_KEYS = ["in", "low", "out"] as const;
+
+/** Accepts "a,b,c" or repeated `?k=a&k=b` — both come out as string[]. */
+const csv = z.preprocess((v) => {
+  if (Array.isArray(v)) return v.flatMap((s) => String(s).split(","));
+  if (typeof v === "string") return v.split(",");
+  return [];
+}, z.array(z.string()).default([]));
+
 const listQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
@@ -14,6 +39,12 @@ const listQuery = z.object({
   favorite: z.coerce.boolean().optional(),
   /** Restrict to SKUs that have an active price schedule. */
   scheduled: z.coerce.boolean().optional(),
+  /** Multi-select channel keys from the filter dropdown. */
+  channels: csv,
+  /** Stock buckets: in (>0), low (>0 && <50), out (=0). */
+  stockBuckets: csv,
+  priceMin: z.coerce.number().nonnegative().optional(),
+  priceMax: z.coerce.number().nonnegative().optional(),
 });
 
 const selectCols = sql`
@@ -36,6 +67,42 @@ export default async function skuRoutes(app: FastifyInstance) {
     const offset = (q.page - 1) * q.pageSize;
     const search = q.search ? `%${q.search}%` : null;
 
+    // Build the multi-channel predicate. Each key turns into a small OR
+    // clause; we union them into a single ANDed group so a row needs to match
+    // *any* selected key.
+    const channelKeys = (q.channels ?? []).filter((k) =>
+      (CHANNEL_KEYS as readonly string[]).includes(k),
+    );
+    const channelClause = channelKeys.length
+      ? sql`and (${channelKeys
+          .map((k) => {
+            if (k === "amazon-fba") {
+              return sql`(channel = 'amazon' and coalesce(fulfillment_channel,'') <> 'DEFAULT')`;
+            }
+            if (k === "amazon-fbm") {
+              return sql`(channel = 'amazon' and fulfillment_channel = 'DEFAULT')`;
+            }
+            return sql`(channel = ${k})`;
+          })
+          .reduce((acc, frag, i) => (i === 0 ? frag : sql`${acc} or ${frag}`))})`
+      : sql``;
+
+    // Stock buckets — "in" / "low" / "out". `stock` is already the channel
+    // total (greatest(stock, merchant+fba_fulfillable+fba_pending)) thanks to
+    // the listings/FBA sync upserts.
+    const stockKeys = (q.stockBuckets ?? []).filter((k) =>
+      (STOCK_KEYS as readonly string[]).includes(k),
+    );
+    const stockClause = stockKeys.length
+      ? sql`and (${stockKeys
+          .map((k) => {
+            if (k === "in") return sql`(stock > 0)`;
+            if (k === "low") return sql`(stock > 0 and stock < 50)`;
+            return sql`(stock <= 0)`;
+          })
+          .reduce((acc, frag, i) => (i === 0 ? frag : sql`${acc} or ${frag}`))})`
+      : sql``;
+
     const where = sql`
       where workspace_id = ${wsId}
       ${search ? sql`and (sku ilike ${search} or title ilike ${search} or asin ilike ${search})` : sql``}
@@ -47,6 +114,10 @@ export default async function skuRoutes(app: FastifyInstance) {
           where workspace_id = ${wsId}
             and status in ('scheduled','running')
         )` : sql``}
+      ${channelClause}
+      ${stockClause}
+      ${q.priceMin != null ? sql`and price >= ${q.priceMin}` : sql``}
+      ${q.priceMax != null ? sql`and price <= ${q.priceMax}` : sql``}
     `;
 
     const [{ count }] = await sql<{ count: number }[]>`

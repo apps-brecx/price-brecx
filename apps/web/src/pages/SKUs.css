@@ -35,3 +35,317 @@
   display: flex;
   gap: 8px;
 }
+
+/* Filters dropdown — opens beneath the Filters chip; matches the redesign
+   `.dropdown-menu` look. */
+.skus-filters {
+  position: relative;
+}
+.skus-filter-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 260px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow:
+    0 12px 32px rgba(11, 13, 18, 0.12),
+    0 0 0 1px rgba(0, 0, 0, 0.02);
+  padding: 10px;
+  z-index: 40;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: skusFilterPop 0.15s ease;
+}
+@keyframes skusFilterPop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.skus-filter-section-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 6px 10px 4px;
+}
+.skus-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  transition: background 0.1s;
+}
+.skus-filter-row:hover {
+  background: var(--surface-2);
+}
+.skus-filter-row input {
+  cursor: pointer;
+}
+.skus-filter-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+.skus-filter-price-row {
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px;
+}
+.skus-filter-price-row .form-control {
+  font-size: 12px;
+  height: 30px;
+  padding: 4px 8px;
+}
+.skus-filter-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 4px;
+}
+
+/* Active state on the Filters chip — same brand tint as the selected tab */
+.skus-filters .filter-chip.active {
+  background: var(--brand-50);
+  border-color: var(--brand-400);
+  color: var(--brand-700);
+}
+
+/* Pagination footer — Ant-Design-style compact bar, right-aligned. */
+.skus-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+}
+.skus-pagination-range {
+  margin-right: 8px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.skus-pagination-ellipsis {
+  min-width: 28px;
+  text-align: center;
+  color: var(--text-3);
+  user-select: none;
+}
+
+/* Page-number button */
+.skus-page-btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: all .1s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.skus-page-btn:hover { color: var(--brand-700); border-color: var(--brand-400); }
+.skus-page-btn.active {
+  color: var(--brand-700);
+  border-color: var(--brand-600);
+  font-weight: 600;
+  background: var(--surface);
+}
+
+/* Prev / Next chevrons — same hit area as page buttons but borderless */
+.skus-page-arrow {
+  min-width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .1s, background .1s;
+}
+.skus-page-arrow:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.skus-page-arrow:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+/* Page-size dropdown — styled like Ant Design's "50 / page" select */
+.skus-pagesize {
+  height: 28px;
+  padding: 0 8px;
+  margin-left: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: inherit;
+}
+.skus-pagesize:hover {
+  border-color: var(--brand-400);
+}
+
+/* Sticky thead surface — keep the row opaque so the scrolling content
+   behind it doesn't bleed through. */
+.tbl-sticky thead th {
+  background: var(--surface-2);
+}
+
+/* Selected row: brand-tinted background + 3px brand stripe down the left edge.
+   Matches the redesign's `.pa-selected` look so the visual language is the
+   same as the Price Alert table. */
+.tbl tbody tr.row-selected td {
+  background: var(--brand-50);
+}
+.tbl tbody tr.row-selected:hover td {
+  background: var(--brand-50);
+}
+.tbl tbody tr.row-selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--brand-600);
+}
+
+/* ============= Bulk Action Bar (floating, bottom-center) =============
+   Ported from the redesign HTML so the look matches the dark glassy pill
+   the user expects. Hidden by default; .show fades + slides in. */
+.bulk-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: linear-gradient(135deg, #1a1d24 0%, #0b0d12 100%);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 8px 8px 8px 16px;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  z-index: 95;
+  font-size: 13px;
+  backdrop-filter: blur(10px);
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.25s cubic-bezier(0.32, 0.72, 0.5, 1);
+}
+.bulk-bar.show {
+  display: flex;
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  animation: bulkPop 0.3s cubic-bezier(0.32, 0.72, 0.5, 1);
+}
+@keyframes bulkPop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+.bulk-bar-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  font-weight: 550;
+  font-size: 13px;
+}
+.bulk-bar-count strong {
+  background: var(--brand-500, var(--brand-600));
+  color: #fff;
+  padding: 3px 9px;
+  border-radius: 7px;
+  font-weight: 650;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.bulk-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.bulk-bar button {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  border: none;
+  padding: 7px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 550;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.12s;
+}
+.bulk-bar button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.bulk-bar button svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.bulk-bar button.primary {
+  background: var(--brand-500, var(--brand-600));
+  color: #fff;
+}
+.bulk-bar button.primary:hover {
+  background: var(--brand-400, var(--brand-500));
+  box-shadow: 0 4px 12px rgba(31, 71, 229, 0.4);
+}
+.bulk-bar-divider {
+  width: 1px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 2px;
+}
+.bulk-bar button.close-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.5);
+}
+.bulk-bar button.close-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}

@@ -119,6 +119,14 @@
 /* ---------- Table ---------- */
 /* ============= Table ============= */
 .tbl { width:100%; border-collapse: separate; border-spacing:0; }
+/* `.tbl-sticky` opts a table into a viewport-sticky header that parks itself
+   right below the topbar as you scroll. Off by default so tables that live
+   inside their own scroll containers (history, activity log) aren't affected. */
+.tbl-sticky thead th {
+  position: sticky;
+  top: var(--topbar-h, 0);
+  z-index: 5;
+}
 .tbl thead th {
   text-align:left; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em;
   color: var(--text-3); padding: 10px 14px;
@@ -1257,7 +1265,11 @@ select.form-control {
 
 /* Card-wrapped tables: clip rounded corners on desktop,
    scroll horizontally once the viewport gets tight. */
-.card-table-wrap { overflow: hidden; }
+/* `overflow: clip` visually crops overflow (so the table corners stay rounded
+   with the card's border-radius) but — unlike `hidden` — does NOT create a
+   scroll container. That keeps `position: sticky` on .tbl-sticky thead bound
+   to the viewport instead of dying inside an inert clip box. */
+.card-table-wrap { overflow: clip; }
 
 /* Side detail panels stack under the main column */
 @media (max-width: 1024px) {

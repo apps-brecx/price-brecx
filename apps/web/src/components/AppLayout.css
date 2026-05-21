@@ -103,6 +103,10 @@
 
 
 /* ============= Topbar ============= */
+/* `--topbar-h` is the rendered topbar height — surfaced so sticky thead/
+   tab strips downstream can offset themselves with `top: var(--topbar-h)`
+   instead of hard-coding a magic number. */
+:root { --topbar-h: 62px; }
 .topbar {
   display:flex; align-items:center; gap:12px;
   padding: 12px 24px;

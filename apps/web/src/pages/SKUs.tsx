@@ -1,3 +1,4 @@
+import "./SKUs.css";
 import { useEffect, useMemo, useState } from "react";
 import {
   useQuery,
@@ -16,7 +17,8 @@ import { PriceScheduleModal } from "../components/PriceScheduleModal";
 import { BarcodeScanner } from "../components/BarcodeScanner";
 import { useToast } from "../components/Toast";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200] as const;
+const DEFAULT_PAGE_SIZE = 25;
 
 /** Amazon fulfillment-channel → display badge label.
  *  "DEFAULT" = merchant-fulfilled (FBM); anything else (AMAZON_NA, AMAZON_EU…)
@@ -73,24 +75,111 @@ export function SKUs() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [scanOpen, setScanOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [draft, setDraft] = useState<SkuCreateInput>(emptyDraft);
   const [scheduleFor, setScheduleFor] = useState<Sku | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [tagModalOpen, setTagModalOpen] = useState(false);
+  const [tagDraft, setTagDraft] = useState("");
+
+  // ---- Filters ----
+  type ChannelKey =
+    | "amazon-fba"
+    | "amazon-fbm"
+    | "shopify"
+    | "walmart"
+    | "tiktok"
+    | "ebay";
+  type StockBucket = "in" | "low" | "out";
+  interface AppliedFilters {
+    channels: ChannelKey[];
+    stockBuckets: StockBucket[];
+    priceMin: string;
+    priceMax: string;
+  }
+  const EMPTY_FILTERS: AppliedFilters = {
+    channels: [],
+    stockBuckets: [],
+    priceMin: "",
+    priceMax: "",
+  };
+  // `filters` is the *applied* state (drives the API query); `draftFilters`
+  // is what the dropdown is currently editing until the user hits Apply.
+  const [filters, setFilters] = useState<AppliedFilters>(EMPTY_FILTERS);
+  const [draftFilters, setDraftFilters] =
+    useState<AppliedFilters>(EMPTY_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
   type Tab = "all" | "active" | "inactive" | "favorites" | "scheduled";
   const [tab, setTab] = useState<Tab>("all");
 
-  // Reset to page 1 when the tab changes.
-  useEffect(() => setPage(1), [tab]);
+  // Reset to page 1 + clear selection when the tab changes.
+  useEffect(() => {
+    setPage(1);
+    setSelected(new Set());
+  }, [tab]);
 
-  // Debounce search → resets to page 1
+  // Debounce search → resets to page 1 + clears selection.
   useEffect(() => {
     const t = setTimeout(() => {
       setSearch(searchInput);
       setPage(1);
+      setSelected(new Set());
     }, 300);
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  // Applying filters always resets to page 1 and drops the current selection
+  // (a row might fall off the filtered set).
+  function applyFilters(next: AppliedFilters) {
+    setFilters(next);
+    setPage(1);
+    setSelected(new Set());
+    setFiltersOpen(false);
+  }
+  function resetFilters() {
+    setDraftFilters(EMPTY_FILTERS);
+  }
+  function toggleDraftArrayValue<T extends string>(
+    key: "channels" | "stockBuckets",
+    val: T,
+  ) {
+    setDraftFilters((cur) => {
+      const arr = cur[key] as T[];
+      const next = arr.includes(val)
+        ? arr.filter((v) => v !== val)
+        : [...arr, val];
+      return { ...cur, [key]: next };
+    });
+  }
+
+  // Sync draft state when the dropdown opens (so editing always starts from
+  // the currently-applied filters, not whatever was left from a previous
+  // cancel).
+  useEffect(() => {
+    if (filtersOpen) setDraftFilters(filters);
+  }, [filtersOpen, filters]);
+
+  // Close the dropdown on outside click / escape.
+  useEffect(() => {
+    if (!filtersOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setFiltersOpen(false);
+    }
+    function onDocClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.(".skus-filters")) return;
+      setFiltersOpen(false);
+    }
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDocClick);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDocClick);
+    };
+  }, [filtersOpen]);
 
   const tabParams = useMemo(() => {
     switch (tab) {
@@ -107,11 +196,33 @@ export function SKUs() {
     }
   }, [tab]);
 
+  const filterParams = useMemo(() => {
+    const out: Record<string, string> = {};
+    if (filters.channels.length) out.channels = filters.channels.join(",");
+    if (filters.stockBuckets.length)
+      out.stockBuckets = filters.stockBuckets.join(",");
+    if (filters.priceMin) out.priceMin = filters.priceMin;
+    if (filters.priceMax) out.priceMax = filters.priceMax;
+    return out;
+  }, [filters]);
+
+  const activeFilterCount =
+    filters.channels.length +
+    filters.stockBuckets.length +
+    (filters.priceMin ? 1 : 0) +
+    (filters.priceMax ? 1 : 0);
+
   const query = useQuery({
-    queryKey: ["skus", { search, page, tab }],
+    queryKey: ["skus", { search, page, pageSize, tab, filterParams }],
     queryFn: () =>
       api.get<Paginated<Sku>>(
-        `/skus${qs({ search, page, pageSize: PAGE_SIZE, ...tabParams })}`,
+        `/skus${qs({
+          search,
+          page,
+          pageSize,
+          ...tabParams,
+          ...filterParams,
+        })}`,
       ),
     placeholderData: keepPreviousData,
   });
@@ -161,10 +272,163 @@ export function SKUs() {
 
   const data = query.data;
   const total = data?.total ?? 0;
-  const totalPages = data ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : 1;
+  const totalPages = data ? Math.max(1, Math.ceil(total / pageSize)) : 1;
   const items = data?.items ?? [];
-  const fromN = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const toN = Math.min(page * PAGE_SIZE, total);
+  const fromN = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const toN = Math.min(page * pageSize, total);
+
+  /**
+   * Page-number window for the pagination control. Renders up to 7 buttons:
+   * always shows first + last, with current ±2 and ellipses where needed.
+   * Returns either a real page number or "…" so the JSX can decide.
+   */
+  function pageWindow(current: number, totalP: number): (number | "…")[] {
+    if (totalP <= 7) {
+      return Array.from({ length: totalP }, (_, i) => i + 1);
+    }
+    const out: (number | "…")[] = [1];
+    const lo = Math.max(2, current - 2);
+    const hi = Math.min(totalP - 1, current + 2);
+    if (lo > 2) out.push("…");
+    for (let i = lo; i <= hi; i++) out.push(i);
+    if (hi < totalP - 1) out.push("…");
+    out.push(totalP);
+    return out;
+  }
+
+  // ---- Bulk selection helpers ----
+  const idsOnPage = useMemo(() => items.map((s) => s.id), [items]);
+  const selectedOnPage = useMemo(
+    () => idsOnPage.filter((id) => selected.has(id)),
+    [idsOnPage, selected],
+  );
+  const allSelectedOnPage =
+    idsOnPage.length > 0 && selectedOnPage.length === idsOnPage.length;
+  const someSelectedOnPage =
+    selectedOnPage.length > 0 && selectedOnPage.length < idsOnPage.length;
+
+  function toggleRow(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleAllOnPage() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelectedOnPage) {
+        for (const id of idsOnPage) next.delete(id);
+      } else {
+        for (const id of idsOnPage) next.add(id);
+      }
+      return next;
+    });
+  }
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  /** Pull every row we know about across pages (current page + cache). Bulk
+   *  CSV uses this so a "Export selected" hit on page 2 includes page 1 rows
+   *  the user selected earlier without an extra round-trip. */
+  function selectedSkuRows(): Sku[] {
+    return items.filter((s) => selected.has(s.id));
+  }
+
+  const tagSelectedMut = useMutation({
+    mutationFn: async (newTag: string) => {
+      const label = newTag.trim();
+      if (!label) return { count: 0 };
+      const rows = selectedSkuRows();
+      // PATCH one SKU at a time — appends a new tag *object* `{label,color}`
+      // (not a string) so it matches the `tagSchema` on the server. Dedup by
+      // label so re-applying the same tag is a no-op.
+      let count = 0;
+      for (const s of rows) {
+        const existing = s.tags ?? [];
+        if (existing.some((t) => t.label === label)) continue;
+        const tags = [...existing, { label, color: "neutral" as const }];
+        await api.patch<Sku>(`/skus/${s.id}`, { tags });
+        count += 1;
+      }
+      return { count };
+    },
+    onSuccess: ({ count }) => {
+      qc.invalidateQueries({ queryKey: ["skus"] });
+      setTagModalOpen(false);
+      setTagDraft("");
+      toast.success(
+        "Tag added",
+        `Applied to ${count} SKU${count === 1 ? "" : "s"}.`,
+      );
+    },
+    onError: (err) =>
+      toast.error(
+        "Couldn't tag",
+        err instanceof Error ? err.message : "Try again.",
+      ),
+  });
+
+  function exportSelectedCsv() {
+    const rows = selectedSkuRows();
+    if (rows.length === 0) return;
+    const header = [
+      "SKU",
+      "ASIN",
+      "Title",
+      "Status",
+      "Channel",
+      "FBA/FBM",
+      "Price",
+      "Channel Stock",
+      "Sales (30d)",
+    ];
+    const csvCell = (v: string | number | null) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [
+      header.join(","),
+      ...rows.map((s) =>
+        [
+          s.sku,
+          s.asin ?? "",
+          s.title,
+          s.status,
+          s.channel,
+          fbaLabel(s.fulfillmentChannel) ?? "",
+          s.price,
+          s.stock,
+          unitsFor(s, "30d"),
+        ]
+          .map(csvCell)
+          .join(","),
+      ),
+    ];
+    const blob = new Blob([lines.join("\r\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `skus-selected-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function bulkSchedule() {
+    const rows = selectedSkuRows();
+    if (rows.length === 0) return;
+    if (rows.length > 1) {
+      toast.info(
+        "Opens for the first selected SKU",
+        "Bulk-schedule across multiple SKUs is coming — set this one, then move to the next.",
+      );
+    }
+    setScheduleFor(rows[0]);
+  }
 
   const stats = statsQ.data;
   const fmtMoney = (n: number) =>
@@ -438,27 +702,126 @@ export function SKUs() {
             )}
           </div>
         ))}
-      </div>
 
-      {/* Result count row */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginBottom: 14,
-          flexWrap: "wrap",
-        }}
-      >
-        <div style={{ flex: 1 }} />
-        <div style={{ fontSize: 12, color: "var(--text-3)" }}>
-          Showing{" "}
-          <strong style={{ color: "var(--text)" }}>
-            {fromN}–{toN}
-          </strong>{" "}
-          of <strong style={{ color: "var(--text)" }}>{num(total)}</strong>
+        {/* Filters dropdown — multi-select, opens to the right of the chip */}
+        <div className="skus-filters">
+          <div
+            className={
+              "filter-chip" + (activeFilterCount > 0 ? " active" : "")
+            }
+            onClick={() => setFiltersOpen((v) => !v)}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+            </svg>
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="count">{activeFilterCount}</span>
+            )}
+          </div>
+          {filtersOpen && (
+            <div className="skus-filter-menu">
+              <div className="skus-filter-section-label">Channel</div>
+              {(
+                [
+                  ["amazon-fba", "Amazon FBA"],
+                  ["amazon-fbm", "Amazon FBM"],
+                  ["shopify", "Shopify"],
+                  ["walmart", "Walmart"],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="skus-filter-row">
+                  <input
+                    type="checkbox"
+                    checked={draftFilters.channels.includes(key)}
+                    onChange={() =>
+                      toggleDraftArrayValue("channels", key)
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+
+              <div className="skus-filter-divider" />
+              <div className="skus-filter-section-label">Price Range</div>
+              <div className="skus-filter-price-row">
+                <input
+                  className="form-control"
+                  type="number"
+                  min="0"
+                  placeholder="Min"
+                  value={draftFilters.priceMin}
+                  onChange={(e) =>
+                    setDraftFilters((cur) => ({
+                      ...cur,
+                      priceMin: e.target.value,
+                    }))
+                  }
+                />
+                <input
+                  className="form-control"
+                  type="number"
+                  min="0"
+                  placeholder="Max"
+                  value={draftFilters.priceMax}
+                  onChange={(e) =>
+                    setDraftFilters((cur) => ({
+                      ...cur,
+                      priceMax: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="skus-filter-divider" />
+              <div className="skus-filter-section-label">Stock</div>
+              {(
+                [
+                  ["in", "In Stock (> 0)"],
+                  ["low", "Low Stock (< 50)"],
+                  ["out", "Out of Stock"],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="skus-filter-row">
+                  <input
+                    type="checkbox"
+                    checked={draftFilters.stockBuckets.includes(key)}
+                    onChange={() =>
+                      toggleDraftArrayValue("stockBuckets", key)
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+
+              <div className="skus-filter-actions">
+                <button
+                  className="btn btn-secondary btn-xs"
+                  style={{ flex: 1 }}
+                  onClick={resetFilters}
+                >
+                  Reset
+                </button>
+                <button
+                  className="btn btn-primary btn-xs"
+                  style={{ flex: 1 }}
+                  onClick={() => applyFilters(draftFilters)}
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
 
       {query.isLoading ? (
         <Loading />
@@ -480,10 +843,24 @@ export function SKUs() {
       ) : (
         <>
           <div className="card card-table-wrap" style={{ padding: 0 }}>
-            <table className="tbl">
+            <table className="tbl tbl-sticky">
               <thead>
                 <tr>
-                  <th style={{ width: 75 }}>Favourite</th>
+                  <th style={{ width: 38, textAlign: "center" }}>
+                    <input
+                      ref={(el) => {
+                        if (el) {
+                          el.indeterminate =
+                            someSelectedOnPage && !allSelectedOnPage;
+                        }
+                      }}
+                      type="checkbox"
+                      aria-label="Select all on page"
+                      checked={allSelectedOnPage}
+                      onChange={toggleAllOnPage}
+                    />
+                  </th>
+                  <th style={{ width: 65 }}>Favourite</th>
                   <th style={{ width: 80 }}>Status</th>
                   <th style={{ width: 62 }}>Image</th>
                   <th>Product details</th>
@@ -493,7 +870,9 @@ export function SKUs() {
                   <th style={{ width: 120, textAlign: "right" }}>
                     Channel Stock
                   </th>
-                  <th style={{ width: 120, textAlign: "right" }}>Sale</th>
+                  <th style={{ width: 170, textAlign: "right" }}>
+                    Sale (1D · 7D · 15D · 30D)
+                  </th>
                   <th style={{ width: 110, textAlign: "center" }}>
                     Update Price
                   </th>
@@ -501,7 +880,18 @@ export function SKUs() {
               </thead>
               <tbody>
                 {items.map((s) => (
-                  <tr key={s.id}>
+                  <tr
+                    key={s.id}
+                    className={selected.has(s.id) ? "row-selected" : ""}
+                  >
+                    <td style={{ textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${s.sku}`}
+                        checked={selected.has(s.id)}
+                        onChange={() => toggleRow(s.id)}
+                      />
+                    </td>
                     <td style={{ textAlign: "center" }}>
                       <span
                         className={"star" + (s.favorite ? " active" : "")}
@@ -681,37 +1071,82 @@ export function SKUs() {
             </table>
           </div>
 
-          {/* Pagination footer */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginTop: 14,
-              padding: "0 4px",
-            }}
-          >
-            <div style={{ fontSize: 12.5, color: "var(--text-3)" }}>
-              Page {page} of {totalPages}
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                className="btn btn-secondary btn-sm"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
+          {/* Pagination footer — right-aligned, single row */}
+          <div className="skus-pagination">
+            <span className="skus-pagination-range">
+              {total === 0 ? (
+                "0 of 0"
+              ) : (
+                <>
+                  {num(fromN)}-{num(toN)} of {num(total)}
+                </>
+              )}
+            </span>
+            <button
+              className="skus-page-arrow"
+              title="Previous page"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
               >
-                Prev
-              </button>
-              <button
-                className="btn btn-secondary btn-sm"
-                disabled={page >= totalPages}
-                onClick={() =>
-                  setPage((p) => Math.min(totalPages, p + 1))
-                }
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
+            {pageWindow(page, totalPages).map((p, i) =>
+              p === "…" ? (
+                <span key={`e${i}`} className="skus-pagination-ellipsis">
+                  …
+                </span>
+              ) : (
+                <button
+                  key={p}
+                  className={
+                    "skus-page-btn" + (p === page ? " active" : "")
+                  }
+                  onClick={() => setPage(p)}
+                >
+                  {p}
+                </button>
+              ),
+            )}
+            <button
+              className="skus-page-arrow"
+              title="Next page"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
               >
-                Next
-              </button>
-            </div>
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+            <select
+              className="skus-pagesize"
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+            >
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n} / page
+                </option>
+              ))}
+            </select>
           </div>
         </>
       )}
@@ -911,6 +1346,142 @@ export function SKUs() {
         }
         onClose={() => setScheduleFor(null)}
       />
+
+      {/* Bulk action bar — slides up when any SKU is selected */}
+      <div className={"bulk-bar" + (selected.size > 0 ? " show" : "")}>
+        <div className="bulk-bar-count">
+          <strong>{selected.size}</strong>
+          <span>selected</span>
+        </div>
+        <div className="bulk-bar-actions">
+          <button
+            type="button"
+            title="Add a tag to the selected SKUs"
+            onClick={() => setTagModalOpen(true)}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+              <line x1="7" y1="7" x2="7.01" y2="7" />
+            </svg>
+            Tag
+          </button>
+          <button
+            type="button"
+            title="Export selected SKUs as CSV"
+            onClick={exportSelectedCsv}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+            </svg>
+            Export
+          </button>
+          <div className="bulk-bar-divider" />
+          <button
+            type="button"
+            className="primary"
+            title="Schedule a price change"
+            onClick={bulkSchedule}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+            >
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+            </svg>
+            Schedule Price
+          </button>
+          <div className="bulk-bar-divider" />
+          <button
+            type="button"
+            className="close-btn"
+            title="Clear selection"
+            onClick={clearSelection}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Tag modal — adds one tag to all selected SKUs */}
+      <Modal
+        open={tagModalOpen}
+        title="Add tag"
+        subtitle={`Will be added to ${selected.size} selected SKU${selected.size === 1 ? "" : "s"}.`}
+        onClose={() => {
+          setTagModalOpen(false);
+          setTagDraft("");
+        }}
+        footer={
+          <>
+            <button
+              className="btn btn-secondary"
+              onClick={() => {
+                setTagModalOpen(false);
+                setTagDraft("");
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary"
+              disabled={tagSelectedMut.isPending || !tagDraft.trim()}
+              onClick={() => tagSelectedMut.mutate(tagDraft)}
+            >
+              {tagSelectedMut.isPending ? "Tagging…" : "Apply tag"}
+            </button>
+          </>
+        }
+      >
+        <div className="form-group">
+          <label className="form-label">Tag</label>
+          <input
+            className="form-control"
+            placeholder="e.g. Spices"
+            autoFocus
+            value={tagDraft}
+            onChange={(e) => setTagDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && tagDraft.trim()) {
+                tagSelectedMut.mutate(tagDraft);
+              }
+            }}
+          />
+          <div className="form-help">
+            Appended to the SKU's existing tags. Duplicates are skipped.
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
