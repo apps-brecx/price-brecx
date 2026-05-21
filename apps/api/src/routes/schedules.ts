@@ -15,6 +15,7 @@ const salePriceSchema = z.object({
 
 const cols = sql`
   ps.id, ps.sku_id as "skuId", s.sku, s.title,
+  s.image_url as "imageUrl",
   ps.type, ps.status, ps.price::float8 as price,
   ps.current_price::float8 as "currentPrice",
   ps.start_date as "startDate", ps.end_date as "endDate",

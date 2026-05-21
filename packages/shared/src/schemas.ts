@@ -175,6 +175,9 @@ export const priceScheduleSchema = z.object({
   skuId: idSchema,
   sku: z.string(),
   title: z.string(),
+  /** Listing thumbnail for the linked SKU. Joined in by the /schedules route
+   *  so calendar pills + details popups don't need a second lookup. */
+  imageUrl: z.string().nullable().default(null),
   type: z.enum(SCHEDULE_TYPES),
   status: z.enum(SCHEDULE_STATUSES),
   price: z.number().positive(),
