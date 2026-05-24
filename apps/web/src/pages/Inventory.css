@@ -298,3 +298,78 @@
   .inv-product-right { order: 3; gap: 10px; width: 100%; justify-content: space-between; }
   .inv-breakdown-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* Pagination footer — same compact pattern as the SKUs + Pricing pages. */
+.inv-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+}
+.inv-page-ellipsis {
+  min-width: 28px;
+  text-align: center;
+  color: var(--text-3);
+  user-select: none;
+}
+.inv-page-btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: all 0.1s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.inv-page-btn:hover { color: var(--brand-700); border-color: var(--brand-400); }
+.inv-page-btn.active {
+  color: var(--brand-700);
+  border-color: var(--brand-600);
+  font-weight: 600;
+}
+.inv-page-arrow {
+  min-width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.1s, background 0.1s;
+}
+.inv-page-arrow:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.inv-page-arrow:disabled { opacity: 0.35; cursor: not-allowed; }
+.inv-pagesize {
+  height: 28px;
+  padding: 0 8px;
+  margin-left: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: inherit;
+}
+.inv-pagesize:hover { border-color: var(--brand-400); }

@@ -1,7 +1,12 @@
 import "./Inventory.css";
-import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { useEffect, useState } from "react";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { api, qs } from "../lib/api";
 import { money, num, relativeTime } from "../lib/format";
 import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
 import { useToast } from "../components/Toast";
@@ -27,12 +32,17 @@ interface InventoryRow {
 
 interface InventoryData {
   items: InventoryRow[];
+  total: number;
+  page: number;
+  pageSize: number;
   agg: {
     totalUnits: number;
     outOfStock: number;
     lowStock: number;
     skuCount: number;
   };
+  channelCounts: Record<string, number>;
+  tabCounts: { all: number; in: number; low: number; out: number };
   lastFbaSync: {
     at: string;
     ok: boolean;
@@ -108,9 +118,44 @@ type StockTab = "all" | "in" | "low" | "out";
 export function Inventory() {
   const toast = useToast();
   const qc = useQueryClient();
+
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<StockTab>("all");
+  const [channelFilter, setChannelFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+
+  // Debounce search input so we don't spam the API every keystroke. 250ms
+  // matches the SKUs page convention.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 250);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // Any filter change resets to page 1 so the user doesn't end up looking
+  // at "page 5 of 1" after narrowing the result set.
+  useEffect(() => {
+    setPage(1);
+  }, [search, tab, channelFilter, pageSize]);
+
+  // Server-side pagination + filtering. `keepPreviousData` keeps the old
+  // page visible during the next fetch so the UI doesn't flash empty.
   const query = useQuery({
-    queryKey: ["inventory"],
-    queryFn: () => api.get<InventoryData>("/inventory"),
+    queryKey: ["inventory", { search, tab, channelFilter, page, pageSize }],
+    queryFn: () =>
+      api.get<InventoryData>(
+        "/inventory" +
+          qs({
+            search,
+            tab,
+            channel: channelFilter === "all" ? undefined : channelFilter,
+            page,
+            pageSize,
+          }),
+      ),
+    placeholderData: keepPreviousData,
   });
 
   const syncMut = useMutation({
@@ -129,11 +174,6 @@ export function Inventory() {
       ),
   });
 
-  const [open, setOpen] = useState<Set<string>>(new Set());
-  const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<StockTab>("all");
-  const [channelFilter, setChannelFilter] = useState<string>("all");
-
   function toggle(id: string) {
     setOpen((prev) => {
       const next = new Set(prev);
@@ -148,43 +188,34 @@ export function Inventory() {
     toast.success("Copied", `${label} copied to clipboard.`);
   }
 
+  // Server-side pagination — `items` IS the current page. Filtered is just
+  // an alias used by the rest of the render code.
   const items = query.data?.items ?? [];
-
-  const channelCounts = useMemo(() => {
-    const c: Record<string, number> = { all: items.length };
-    for (const r of items) c[r.channel] = (c[r.channel] ?? 0) + 1;
-    return c;
-  }, [items]);
-
-  const tabCounts = useMemo(() => {
-    let inS = 0;
-    let low = 0;
-    let out = 0;
-    for (const r of items) {
-      if (r.stock <= 0) out++;
-      else if (r.stock < 10) low++;
-      else inS++;
-    }
-    return { all: items.length, in: inS, low, out };
-  }, [items]);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return items.filter((r) => {
-      if (channelFilter !== "all" && r.channel !== channelFilter) return false;
-      if (tab === "in" && !(r.stock >= 10)) return false;
-      if (tab === "low" && !(r.stock > 0 && r.stock < 10)) return false;
-      if (tab === "out" && r.stock > 0) return false;
-      if (!q) return true;
-      return (
-        r.sku.toLowerCase().includes(q) ||
-        (r.asin ?? "").toLowerCase().includes(q) ||
-        (r.title ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [items, search, tab, channelFilter]);
-
+  const filtered = items;
+  // KPIs come from the server's aggregate queries (whole workspace) so the
+  // chips don't lie about totals when the user is filtering.
+  const channelCounts = query.data?.channelCounts ?? { all: 0 };
+  const tabCounts =
+    query.data?.tabCounts ?? { all: 0, in: 0, low: 0, out: 0 };
   const channels = Object.keys(channelCounts).filter((c) => c !== "all");
+  // Pagination derived values for the footer.
+  const total = query.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const fromN = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const toN = Math.min(currentPage * pageSize, total);
+
+  function pageWindow(current: number, totalP: number): (number | "…")[] {
+    if (totalP <= 7) return Array.from({ length: totalP }, (_, i) => i + 1);
+    const out: (number | "…")[] = [1];
+    const lo = Math.max(2, current - 2);
+    const hi = Math.min(totalP - 1, current + 2);
+    if (lo > 2) out.push("…");
+    for (let i = lo; i <= hi; i++) out.push(i);
+    if (hi < totalP - 1) out.push("…");
+    out.push(totalP);
+    return out;
+  }
 
   return (
     <div>
@@ -408,8 +439,8 @@ export function Inventory() {
               <input
                 className="input"
                 placeholder="Search ASIN, SKU, title…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 style={{ width: "100%" }}
               />
             </div>
@@ -433,10 +464,12 @@ export function Inventory() {
                   marginBottom: 10,
                 }}
               >
+                Showing{" "}
                 <strong style={{ color: "var(--text)" }}>
-                  {filtered.length}
+                  {num(fromN)}-{num(toN)}
                 </strong>{" "}
-                of {items.length} SKU{items.length === 1 ? "" : "s"}
+                of <strong style={{ color: "var(--text)" }}>{num(total)}</strong>{" "}
+                SKU{total === 1 ? "" : "s"}
               </div>
               <div className="inv-product-list">
                 {filtered.map((r) => {
@@ -585,6 +618,78 @@ export function Inventory() {
                   );
                 })}
               </div>
+
+              {/* Server-side pagination footer — same compact pattern as
+                  the SKUs + Pricing pages. */}
+              {totalPages > 1 && (
+                <div className="inv-pagination">
+                  <button
+                    className="inv-page-arrow"
+                    title="Previous page"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                  </button>
+                  {pageWindow(currentPage, totalPages).map((p, i) =>
+                    p === "…" ? (
+                      <span key={`e${i}`} className="inv-page-ellipsis">
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        className={
+                          "inv-page-btn" +
+                          (p === currentPage ? " active" : "")
+                        }
+                        onClick={() => setPage(p)}
+                      >
+                        {p}
+                      </button>
+                    ),
+                  )}
+                  <button
+                    className="inv-page-arrow"
+                    title="Next page"
+                    disabled={currentPage >= totalPages}
+                    onClick={() =>
+                      setPage((p) => Math.min(totalPages, p + 1))
+                    }
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+                  <select
+                    className="inv-pagesize"
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                  >
+                    {[25, 50, 100, 200].map((n) => (
+                      <option key={n} value={n}>
+                        {n} / page
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </>
           )}
         </>
