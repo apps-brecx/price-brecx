@@ -38,14 +38,23 @@ const envSchema = z.object({
   R2_BUCKET: z.string().optional(),
   R2_PUBLIC_BASE_URL: z.string().optional(),
 
-  // Amazon SP-API (LWA) — when absent the stub provider is used. Names match
-  // the legacy price-scheduling-server so values copy across 1:1.
+  // Amazon SP-API (LWA) — kept for legacy/standalone use, but the canonical
+  // source of multi-channel inventory is now NineYard (see below).
   REFRESH_TOKEN: z.string().optional(),
   LWA_APP_ID: z.string().optional(),
   LWA_CLIENT_SECRET: z.string().optional(),
   SELLER_ID: z.string().optional(),
   MARKETPLACE_ID: z.string().optional(),
   SPAPI_ENDPOINT: z.string().default("https://sellingpartnerapi-na.amazon.com"),
+
+  // NineYard — the consolidated multi-channel inventory backend. Returns
+  // per-(account × channel) SKU listings, master items, and stock. When all
+  // four NY_* values are set the NineYard sync replaces the legacy direct
+  // Amazon SP-API sync as the primary data source.
+  NINEYARD_BASE: z.string().default("https://backyard.nineyard.com"),
+  NY_EMAIL: z.string().optional(),
+  NY_PASSWORD: z.string().optional(),
+  NY_COMPANY_ID: z.coerce.number().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

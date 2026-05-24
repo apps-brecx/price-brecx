@@ -12,6 +12,7 @@ import {
   type StageResult,
 } from "./amazon/sync.js";
 import { runLostBuyboxScan } from "./amazon/buyboxScan.js";
+import { syncNineyardToSkus, nineyardReady } from "./nineyard/index.js";
 import {
   beginScan,
   endScan,
@@ -55,6 +56,9 @@ export const APPLY_PRICE_QUEUE = "apply-price";
 /** Every minute: fires weekly/monthly schedule slots whose local time has come. */
 export const SCHEDULE_TICK_QUEUE = "schedule-tick";
 export const SYNC_AMAZON_QUEUE = "sync-amazon";
+/** Consolidated NineYard sync — replaces the per-stage Amazon SP-API pipeline
+ *  when NineYard credentials are configured (NY_EMAIL / NY_PASSWORD / NY_COMPANY_ID). */
+export const SYNC_NINEYARD_QUEUE = "sync-nineyard";
 export const LOST_BUYBOX_SCAN_QUEUE = "lost-buybox-scan";
 /** Hourly fan-out: enqueues a Lost Buy Box scan for every workspace. */
 export const LOST_BUYBOX_CRON_QUEUE = "lost-buybox-cron";
@@ -233,6 +237,46 @@ export async function startJobs(): Promise<void> {
         entityType: "sku",
         entityId: null,
         summary: `Amazon sync failed — ${msg}`,
+        meta: { error: msg },
+      });
+      broadcast(workspaceId, { type: "skus_synced", ok: false, error: msg });
+    }
+  });
+
+  /* ---------------------- NineYard sync worker ---------------------- */
+  // One-call pipeline: master items → marketplace SKUs → mappings. Replaces
+  // the 4-stage Amazon flow when NineYard credentials are present.
+  await boss.createQueue(SYNC_NINEYARD_QUEUE);
+  await boss.work<SyncAmazonJob>(SYNC_NINEYARD_QUEUE, async ([job]) => {
+    const { workspaceId, actor } = job.data;
+    try {
+      const res = await syncNineyardToSkus(workspaceId);
+      await recordActivity({
+        workspaceId,
+        actor,
+        action: "updated",
+        entityType: "sku",
+        entityId: null,
+        summary: `NineYard sync — ${res.skus} SKUs, ${res.items} items, ${res.mapped} mapped (${res.mode})`,
+        meta: { ...res },
+      });
+      broadcast(workspaceId, {
+        type: "skus_synced",
+        ok: true,
+        count: res.skus,
+        mode: res.mode === "live" ? "live" : "stub",
+      });
+      logger.info({ workspaceId, ...res }, "sync-nineyard job done");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, workspaceId }, "sync-nineyard job failed");
+      await recordActivity({
+        workspaceId,
+        actor,
+        action: "updated",
+        entityType: "sku",
+        entityId: null,
+        summary: `NineYard sync failed — ${msg}`,
         meta: { error: msg },
       });
       broadcast(workspaceId, { type: "skus_synced", ok: false, error: msg });
@@ -766,6 +810,16 @@ export async function startJobs(): Promise<void> {
 /** Enqueue an Amazon → DB sync (runs async; report polling can take minutes). */
 export async function enqueueAmazonSync(data: SyncAmazonJob): Promise<void> {
   await getBoss().send(SYNC_AMAZON_QUEUE, data);
+}
+
+/** Enqueue a NineYard → DB sync. Falls back to the legacy Amazon SP-API path
+ *  via `enqueueAmazonSync` when NineYard creds aren't configured. */
+export async function enqueueInventorySync(data: SyncAmazonJob): Promise<void> {
+  if (nineyardReady()) {
+    await getBoss().send(SYNC_NINEYARD_QUEUE, data);
+  } else {
+    await getBoss().send(SYNC_AMAZON_QUEUE, data);
+  }
 }
 
 /** Enqueue a Lost Buy Box scan (report + competitiveSummary on every ASIN). */

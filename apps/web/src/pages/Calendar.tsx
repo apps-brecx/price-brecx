@@ -148,6 +148,12 @@ export function Calendar() {
   const [pickerSearch, setPickerSearch] = useState("");
   // Event details popup when a pill is clicked.
   const [detailsFor, setDetailsFor] = useState<PriceSchedule | null>(null);
+  // "See all schedules for this day" popup, opened from the "+N more" pill on
+  // a crowded month cell — avoids jumping to day view to read the overflow.
+  const [allEventsFor, setAllEventsFor] = useState<{
+    date: Date;
+    events: PriceSchedule[];
+  } | null>(null);
 
   const query = useQuery({
     queryKey: ["schedules"],
@@ -530,7 +536,31 @@ export function Calendar() {
                 }
                 onClick={openPicker}
               >
-                <span className="date-num">{pad2(cell.date.getDate())}</span>
+                <div className="cal-cell-head">
+                  <span className="date-num">{pad2(cell.date.getDate())}</span>
+                  <button
+                    className="cal-add-btn"
+                    aria-label="Add schedule on this day"
+                    title="Add schedule"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openPicker();
+                    }}
+                  >
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.6"
+                      strokeLinecap="round"
+                    >
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                  </button>
+                </div>
                 {shown.map((s) => (
                   <div
                     key={s.id}
@@ -546,9 +576,7 @@ export function Calendar() {
                     className="cal-event cal-event-more"
                     onClick={(e) => {
                       e.stopPropagation();
-                      // Jump to day view to see all events.
-                      setCursor(new Date(year, cell.date.getMonth(), cell.date.getDate()));
-                      setView("day");
+                      setAllEventsFor({ date: cell.date, events: evts });
                     }}
                   >
                     +{more} more
@@ -770,11 +798,103 @@ export function Calendar() {
         </div>
       </Modal>
 
+      {/* All schedules on a single day — opened from "+N more" pill */}
+      <Modal
+        open={!!allEventsFor}
+        title={
+          allEventsFor
+            ? `Schedules on ${MONTHS_SHORT[allEventsFor.date.getMonth()]} ${allEventsFor.date.getDate()}, ${allEventsFor.date.getFullYear()}`
+            : ""
+        }
+        subtitle={
+          allEventsFor
+            ? `${allEventsFor.events.length} scheduled event${allEventsFor.events.length === 1 ? "" : "s"} on this day — click any to see details.`
+            : undefined
+        }
+        size="lg"
+        onClose={() => setAllEventsFor(null)}
+        footer={
+          allEventsFor && (
+            <>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setAllEventsFor(null)}
+              >
+                Close
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setAllEventsFor(null);
+                  openPicker();
+                }}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                New schedule
+              </button>
+            </>
+          )
+        }
+      >
+        {allEventsFor && (
+          <div className="cal-allday-list">
+            {allEventsFor.events.map((s) => (
+              <div
+                key={s.id}
+                className="cal-allday-row"
+                onClick={() => {
+                  setAllEventsFor(null);
+                  setDetailsFor(s);
+                }}
+              >
+                <span
+                  className={`cal-event ${EVENT_CLASS[s.type]}`}
+                  style={{ margin: 0, textTransform: "capitalize" }}
+                  title={s.type}
+                >
+                  {s.type}
+                </span>
+                <div className="cal-allday-main">
+                  <div className="cal-allday-title">{s.title}</div>
+                  <div className="cal-allday-sub">
+                    <span className="copy-btn">{s.sku}</span>
+                    <span style={{ color: "var(--text-3)" }}>
+                      {money(s.currentPrice)} → <b>{money(s.price)}</b>
+                    </span>
+                  </div>
+                </div>
+                <StatusBadge status={s.status} />
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  style={{ color: "var(--text-3)", flexShrink: 0 }}
+                >
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
       {/* Event details popup — click a pill */}
       <Modal
         open={!!detailsFor}
         title="Schedule details"
-        subtitle={detailsFor?.title ?? undefined}
         onClose={() => setDetailsFor(null)}
         footer={
           detailsFor && (

@@ -6,7 +6,7 @@ import {
   useQueryClient,
   keepPreviousData,
 } from "@tanstack/react-query";
-import type { Sku, Paginated, SalesChannel } from "@fbm/shared";
+import type { Sku, Paginated } from "@fbm/shared";
 import { CHANNEL_LABELS } from "@fbm/shared";
 import { api, qs } from "../lib/api";
 import { money, num } from "../lib/format";
@@ -15,9 +15,12 @@ import { Modal } from "../components/Modal";
 
 const PAGE_SIZE = 50;
 
-/** Marketplace badge styling, mirroring the redesign's per-channel chips. */
+/** Marketplace badge styling, mirroring the redesign's per-channel chips.
+ *  Keyed loosely so it survives the channel field being relaxed to `string`
+ *  after the NineYard cutover (new channels like "wholesale", "mirakl" land
+ *  with a neutral fallback rather than a type error). */
 const CHANNEL_ICON: Record<
-  SalesChannel,
+  string,
   { short: string; bg: string; color: string; border?: boolean }
 > = {
   amazon: { short: "a", bg: "#e47911", color: "#fff" },
@@ -27,6 +30,9 @@ const CHANNEL_ICON: Record<
   ebay: { short: "e", bg: "#fff", color: "#0064d2", border: true },
   etsy: { short: "E", bg: "#f1641e", color: "#fff" },
   faire: { short: "F", bg: "#1a1a1a", color: "#fff" },
+  wholesale: { short: "W", bg: "#475569", color: "#fff" },
+  mirakl: { short: "M", bg: "#0ea5e9", color: "#fff" },
+  unknown: { short: "?", bg: "#94a3b8", color: "#fff" },
 };
 
 /** Map API tag colors → the redesign's .pv2-tag tone classes. */
@@ -249,7 +255,7 @@ export function PricingV2() {
           {/* Rows */}
           <div className="pv2-rows">
             {filtered.map((s) => {
-              const ch = CHANNEL_ICON[s.channel];
+              const ch = (CHANNEL_ICON[s.channel] ?? CHANNEL_ICON.unknown);
               const checked = selected.has(s.id);
               const isSelected = selectedRow === s.id;
               return (
@@ -334,7 +340,7 @@ export function PricingV2() {
                           >
                             {ch.short}
                           </span>
-                          {CHANNEL_LABELS[s.channel]}
+                          {((CHANNEL_LABELS as Record<string, string>)[s.channel] ?? s.channel)}
                         </span>
                         <span
                           className={
@@ -413,7 +419,7 @@ export function PricingV2() {
                       >
                         {ch.short}
                       </span>
-                      {CHANNEL_LABELS[s.channel]}
+                      {((CHANNEL_LABELS as Record<string, string>)[s.channel] ?? s.channel)}
                     </div>
                     <div className="pv2-mp-price">{money(s.price)}</div>
                     <div className="pv2-mp-stock-row">
@@ -534,7 +540,7 @@ function SetPriceModal({
     >
       <p className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
         Current price {sku ? money(sku.price) : ""} on{" "}
-        {sku ? CHANNEL_LABELS[sku.channel] : ""}.
+        {sku ? ((CHANNEL_LABELS as Record<string, string>)[sku.channel] ?? sku.channel) : ""}.
       </p>
       <div className="form-group">
         <label className="form-label">New price (USD)</label>

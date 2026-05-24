@@ -3,7 +3,7 @@ import { z } from "zod";
 import { skuCreateSchema, skuUpdateSchema } from "@fbm/shared";
 import { sql, jsonb } from "../db.js";
 import { recordActivity } from "../lib/activity.js";
-import { enqueueAmazonSync } from "../jobs.js";
+import { enqueueInventorySync } from "../jobs.js";
 
 /**
  * Multi-channel filter keys for the SKUs filter dropdown. "amazon-fba" and
@@ -55,6 +55,13 @@ const selectCols = sql`
   cost::float8 as cost, stock, sales_30d as "sales30d",
   sales_metrics as "salesMetrics",
   status, favorite, tags,
+  account, account_sku_id as "accountSkuId",
+  channel_id as "channelId", nineyard_item_id as "nineyardItemId",
+  min_price::float8 as "minPrice", max_price::float8 as "maxPrice",
+  default_price::float8 as "defaultPrice", map_price::float8 as "mapPrice",
+  reserve, inbound_stock as "inboundStock",
+  prep_cost::float8 as "prepCost", ship_cost::float8 as "shipCost",
+  markup::float8 as markup, is_active as "isActive",
   created_at as "createdAt", updated_at as "updatedAt"
 `;
 
@@ -132,12 +139,13 @@ export default async function skuRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Kick off an Amazon → DB sync for the caller's workspace. Runs async via
-   * pg-boss (the merchant-listings report can take minutes); the SKUs list
-   * refreshes over the websocket ("skus_synced") when it finishes.
+   * Kick off an inventory sync for the caller's workspace. Routes to NineYard
+   * when NY_* credentials are configured, otherwise falls back to the legacy
+   * Amazon SP-API report-based pipeline. Runs async via pg-boss; the SKUs
+   * list refreshes over the websocket ("skus_synced") when it finishes.
    */
   app.post("/skus/sync", async (req) => {
-    await enqueueAmazonSync({
+    await enqueueInventorySync({
       workspaceId: req.user!.workspaceId,
       actor: req.user!.email,
     });
@@ -233,6 +241,12 @@ export default async function skuRoutes(app: FastifyInstance) {
     if (body.status !== undefined) patch.status = body.status;
     if (body.favorite !== undefined) patch.favorite = body.favorite;
     if (body.tags !== undefined) patch.tags = jsonb(body.tags);
+    if (body.isActive !== undefined) {
+      patch.is_active = body.isActive;
+      // Keep the legacy `status` enum in sync so the SKUs page filter still
+      // works without a separate column read.
+      patch.status = body.isActive ? "active" : "inactive";
+    }
     patch.updated_at = sql`now()`;
 
     const cols = Object.keys(patch);

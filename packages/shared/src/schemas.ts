@@ -95,8 +95,9 @@ export const skuSchema = z.object({
   asin: z.string().nullable(),
   title: z.string(),
   imageUrl: z.string().nullable(),
-  channel: z.enum(SALES_CHANNELS),
-  /** Amazon fulfillment-channel: "DEFAULT" => FBM, else (AMAZON_*) => FBA. */
+  channel: z.string(),
+  /** Amazon fulfillment-channel: "DEFAULT" => FBM, else (AMAZON_*) => FBA.
+   *  Populated for non-Amazon channels too when NineYard provides it. */
   fulfillmentChannel: z.string().nullable(),
   /** Amazon fulfillable barcode (from FBA inventory summaries). */
   fnSku: z.string().nullable(),
@@ -114,6 +115,27 @@ export const skuSchema = z.object({
   tags: z.array(tagSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
+
+  /* ---------------- NineYard-sourced fields (nullable for pre-cutover rows
+   * that came from the direct Amazon SP-API sync). */
+  /** Seller-account display name from NineYard (e.g. "FF US", "FRESH FINEST LLC"). */
+  account: z.string().nullable().default(null),
+  /** NineYard's globally-unique listing id; survives sku/title edits upstream. */
+  accountSkuId: z.number().int().nullable().default(null),
+  /** NineYard channel id (ASIN for Amazon, listing id for Shopify, etc.). */
+  channelId: z.string().nullable().default(null),
+  /** NineYard master inventory itemId — joins rows of the same product across accounts. */
+  nineyardItemId: z.number().int().nullable().default(null),
+  minPrice: z.number().nullable().default(null),
+  maxPrice: z.number().nullable().default(null),
+  defaultPrice: z.number().nullable().default(null),
+  mapPrice: z.number().nullable().default(null),
+  reserve: z.number().int().nullable().default(null),
+  inboundStock: z.number().int().nullable().default(null),
+  prepCost: z.number().nullable().default(null),
+  shipCost: z.number().nullable().default(null),
+  markup: z.number().nullable().default(null),
+  isActive: z.boolean().default(true),
 });
 export type Sku = z.infer<typeof skuSchema>;
 
@@ -131,6 +153,20 @@ export const skuCreateSchema = skuSchema
     salesMetrics: true,
     favorite: true,
     tags: true,
+    account: true,
+    accountSkuId: true,
+    channelId: true,
+    nineyardItemId: true,
+    minPrice: true,
+    maxPrice: true,
+    defaultPrice: true,
+    mapPrice: true,
+    reserve: true,
+    inboundStock: true,
+    prepCost: true,
+    shipCost: true,
+    markup: true,
+    isActive: true,
   });
 export type SkuCreateInput = z.infer<typeof skuCreateSchema>;
 

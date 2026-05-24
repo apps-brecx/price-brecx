@@ -33,7 +33,22 @@
       "Bash(pnpm --filter @fbm/web exec tsc --noEmit)",
       "Bash(pnpm --filter @fbm/shared build)",
       "Bash(head -911 apps/web/src/pages/SKUs.tsx)",
-      "Bash(mv /tmp/skus_head.tsx apps/web/src/pages/SKUs.tsx)"
+      "Bash(mv /tmp/skus_head.tsx apps/web/src/pages/SKUs.tsx)",
+      "Bash(curl -s -o /tmp/ny_root.html -w \"HTTP %{http_code} | type=%{content_type} | size=%{size_download}\\\\n\" https://backyard.nineyard.com/)",
+      "Bash(curl -s -o /dev/null -w \"Location: %{redirect_url}\\\\n\" -I https://backyard.nineyard.com/swagger)",
+      "Bash(curl -sL https://backyard.nineyard.com/swagger -o /tmp/swagger.html -w \"HTTP %{http_code} | type=%{content_type}\\\\n\")",
+      "Bash(curl -s https://backyard.nineyard.com/swagger/v1/swagger.json -o /tmp/ny_swagger.json)",
+      "Bash(python3 -c \"import json; s=json.load\\(open\\('/tmp/ny_swagger.json'\\)\\); print\\('Title:', s.get\\('info',{}\\).get\\('title'\\)\\); print\\('Version:', s.get\\('info',{}\\).get\\('version'\\)\\); print\\('Total paths:', len\\(s.get\\('paths',{}\\)\\)\\)\")",
+      "Bash(node *)",
+      "Bash(curl -s https://backyard.nineyard.com/swagger/v1/swagger.json -o ./_ny_swagger.json)",
+      "Bash(grep -n \"^function PriceHistoryChart\\\\|^}$\" apps/web/src/pages/PriceAlert.tsx)",
+      "Bash(cp \"C:/DEV/DEV/priceobo-working_branch/price-scheduling-client/src/assets/images/Amazon.png\" c:/DEV/DEV/price-brecx/apps/web/src/assets/marketplaces/amazon.png)",
+      "Bash(cp \"C:/DEV/DEV/priceobo-working_branch/price-scheduling-client/src/assets/images/Shopify.png\" c:/DEV/DEV/price-brecx/apps/web/src/assets/marketplaces/shopify.png)",
+      "Bash(cp \"C:/DEV/DEV/priceobo-working_branch/price-scheduling-client/src/assets/images/walmart-logo.png\" c:/DEV/DEV/price-brecx/apps/web/src/assets/marketplaces/walmart.png)",
+      "Bash(cp \"C:/DEV/DEV/priceobo-working_branch/price-scheduling-client/src/assets/images/Tiktok.png\" c:/DEV/DEV/price-brecx/apps/web/src/assets/marketplaces/tiktok.png)",
+      "Bash(cp \"C:/DEV/DEV/priceobo-working_branch/price-scheduling-client/src/assets/images/Ebay.png\" c:/DEV/DEV/price-brecx/apps/web/src/assets/marketplaces/ebay.png)",
+      "Bash(grep -n \"channel-icon \\\\${meta.cls}\\\\|channel-icon \\\\${channelMeta.cls}\" apps/web/src/pages/PriceAlert.tsx)",
+      "Bash(grep -n \"channel-icon \\\\${channelMeta.cls}\\\\|channel-icon \\\\${meta.cls}\" apps/web/src/pages/PriceAlert.tsx)"
     ]
   }
 }

@@ -1,5 +1,378 @@
 /* Price Alert / Pricing page — co-located styling, ported from the Priceobo redesign spec. */
 
+/* ============= Top toolbar ============= */
+.pa-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.pa-search-wrap {
+  flex: 1;
+  max-width: 520px;
+}
+.pa-filter-active { border-color: var(--brand-500) !important; color: var(--brand-700) !important; background: var(--brand-50) !important; }
+.pa-filter-chip {
+  margin-left: 4px;
+  background: var(--brand-600);
+  color: #fff;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.pa-tag-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  padding: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 30;
+}
+.pa-tag-menu .dropdown-item {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+.pa-tag-menu .dropdown-item:hover { background: var(--surface-2); }
+
+/* Header checkbox — same vertical alignment as the rest of the header strip. */
+.pa-cards-head-check {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 10px;
+}
+.pa-cards-head-check input { cursor: pointer; }
+
+/* ============= Layout split ============= */
+.pa-layout {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: 14px;
+  align-items: start;
+  transition: grid-template-columns .18s ease;
+}
+/* Hidden right panel — table takes the full viewport so the 8-channel grid
+   doesn't have to compete with a 400px side card for horizontal real estate. */
+.pa-layout.pa-panel-hidden { grid-template-columns: 1fr; }
+.pa-layout.pa-panel-hidden .pa-right-card { display: none; }
+
+.pa-table-card { padding: 0; overflow: hidden; }
+
+/* ============= Card-grid layout (replaces wide horizontal table) =============
+   Each product is its own card. Three sections: product info on the left, a
+   compact base-price column in the middle, and a fluid grid of marketplace
+   mini-cards on the right that wraps to 2 rows of 4 cells for 8 channels.
+   Everything fits the viewport without horizontal scrolling. */
+.pa-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+/* Header shares the same 3-column grid template as .pa-card so the channel
+   filter chips on the right line up over the marketplace mini-cards below.
+   Internal padding mirrors the card padding so columns visually fall on the
+   same x-coordinates. */
+.pa-cards-head {
+  display: grid;
+  grid-template-columns: minmax(260px, 24%) 92px 1fr;
+  gap: 14px;
+  align-items: center;
+  padding: 8px 14px;
+  margin: -4px 0 4px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pa-cards-head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pa-cards-head-base {
+  text-align: center;
+  border-left: 1px dashed transparent;
+  border-right: 1px dashed transparent;
+}
+.pa-cards-head-channels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+.pa-channel-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: all 0.1s;
+  min-width: 0;
+}
+.pa-channel-filter:hover {
+  border-color: var(--brand-400);
+  color: var(--brand-700);
+}
+.pa-channel-filter.active {
+  background: var(--brand-50);
+  border-color: var(--brand-500);
+  color: var(--brand-700);
+}
+.pa-channel-filter .channel-icon,
+.pa-channel-filter .pa-channel-logo { width: 18px; height: 18px; }
+.pa-channel-filter-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Marketplace PNG logos — keep the aspect ratio square and drop any default
+   <img> border. Slight rounded corner softens hard-edged sources like the
+   Walmart logo. */
+.pa-channel-logo {
+  object-fit: contain;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+/* Card body */
+.pa-card {
+  display: grid;
+  grid-template-columns: minmax(260px, 24%) 92px 1fr;
+  gap: 14px;
+  align-items: stretch;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.pa-card:hover { border-color: var(--brand-300); }
+.pa-card.pa-selected {
+  border-color: var(--brand-500);
+  box-shadow: 0 0 0 1px var(--brand-300);
+  background: var(--brand-50);
+}
+
+/* Left section: checkbox + image + product info */
+.pa-card-left {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+}
+.pa-card-left input[type="checkbox"] { margin-top: 4px; flex-shrink: 0; }
+.pa-card-left img {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  flex-shrink: 0;
+}
+.pa-card-info { flex: 1; min-width: 0; }
+.pa-card-title {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--brand-700);
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+  margin-bottom: 6px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.pa-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.pa-card-meta .pa-meta-pill {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-weight: 500;
+  font-size: 11px;
+}
+
+/* Middle section: base price */
+.pa-card-base {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-left: 1px dashed var(--border);
+  border-right: 1px dashed var(--border);
+  padding: 0 10px;
+}
+
+/* Right section: fluid grid of marketplace mini-cards */
+.pa-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+.pa-card-grid .pa-channel-mini {
+  margin: 0;
+  min-height: 66px;
+}
+
+/* Stock + truck row inside each mini-card. Both share the same neutral
+   gray palette so they read as related metrics, not foreground vs accent. */
+.pa-channel-mini-stockrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.pa-truck-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+.pa-channel-mini-empty .pa-truck-pill { color: var(--text-4); }
+
+/* Responsive — at narrow viewports drop the base column off to its own row */
+@media (max-width: 1100px) {
+  .pa-card { grid-template-columns: 1fr; gap: 10px; }
+  .pa-card-base {
+    border: none;
+    flex-direction: row;
+    justify-content: flex-start;
+    padding: 0;
+  }
+  .pa-cards-head { display: none; }
+}
+.pa-right-card {
+  padding: 0;
+  position: sticky;
+  top: 78px;
+  max-height: calc(100vh - 100px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============= Pagination (Pricing page) ============= */
+.pa-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.pa-pagination-range {
+  margin-right: 8px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.pa-pagination-ellipsis {
+  min-width: 28px;
+  text-align: center;
+  color: var(--text-3);
+  user-select: none;
+}
+.pa-page-btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: all .1s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pa-page-btn:hover { color: var(--brand-700); border-color: var(--brand-400); }
+.pa-page-btn.active {
+  color: var(--brand-700);
+  border-color: var(--brand-600);
+  font-weight: 600;
+  background: var(--surface);
+}
+.pa-page-arrow {
+  min-width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .1s, background .1s;
+}
+.pa-page-arrow:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.pa-page-arrow:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+.pa-pagesize {
+  height: 28px;
+  padding: 0 8px;
+  margin-left: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: inherit;
+}
+.pa-pagesize:hover { border-color: var(--brand-400); }
+
 /* ============= Price Alert Table ============= */
 .pa-table {
   width: 100%;
@@ -175,19 +548,19 @@
 
 /* Channel cells — mini cards */
 .pa-channel-cell {
-  padding: 10px 6px !important;
+  padding: 6px 4px !important;
   font-variant-numeric: tabular-nums;
 }
 .pa-channel-mini {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 9px 11px;
+  border-radius: 8px;
+  padding: 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   transition: all .12s;
-  min-height: 78px;
+  min-height: 66px;
 }
 .pa-channel-mini:hover {
   border-color: var(--brand-300);
@@ -205,17 +578,23 @@
   margin-bottom: 2px;
 }
 .pa-channel-mini-name {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 .pa-channel-mini-price {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: -0.015em;
   color: var(--text);
 }
 .pa-channel-mini-price.has-alert { color: var(--danger-fg); }
+.pa-channel-mini-price.has-positive { color: var(--success-fg); }
 .pa-channel-mini-price .pa-dash {
   color: var(--text-4);
   font-size: 18px;
@@ -238,5 +617,479 @@
   font-size: 10px;
   font-weight: 700;
 }
+.pa-channel-mini-click { cursor: pointer; }
 
+/* Grid table — per-channel columns laid out evenly so the header chips align with their column mini-cards.
+   With 8 (account × channel) columns the table is wider than the viewport: width:max-content lets it
+   exceed its container, min-width:100% keeps it at least viewport-wide, and the parent card's
+   overflow-x:auto handles the horizontal scroll. table-layout:fixed pins columns to their declared
+   widths so the head/body align cleanly. */
+.pa-table-grid {
+  table-layout: fixed;
+  width: max-content;
+  min-width: 100%;
+}
+.pa-col-check { width: 38px; }
+.pa-col-product { width: 260px; }
+.pa-col-base { width: 80px; text-align: center; }
+.pa-col-channel { width: 120px; }
+.pa-base-cell { width: 80px; }
+.pa-channel-cell { width: 120px; }
 
+/* Sticky-left rail — the checkbox, product, and base-price columns stay
+   pinned while the user scrolls through the marketplace columns. Without
+   this the product name disappears off the left edge the moment they look
+   at any channel past Amazon. */
+.pa-table-grid thead th.pa-col-check,
+.pa-table-grid thead th.pa-col-product,
+.pa-table-grid thead th.pa-col-base {
+  position: sticky;
+  background: var(--surface-2);
+  z-index: 3;
+}
+.pa-table-grid tbody td.pa-col-check,
+.pa-table-grid tbody td.pa-col-product,
+.pa-table-grid tbody td.pa-base-cell {
+  position: sticky;
+  background: var(--surface);
+  z-index: 2;
+}
+.pa-table-grid .pa-col-check { left: 0; }
+.pa-table-grid .pa-col-product { left: 38px; }
+.pa-table-grid .pa-col-base,
+.pa-table-grid .pa-base-cell { left: 298px; /* 38 + 260 */ }
+
+/* Right edge shadow on the last sticky column so users see that the area to
+   the right is scrollable content, not just whitespace. */
+.pa-table-grid thead .pa-col-base,
+.pa-table-grid tbody .pa-base-cell {
+  box-shadow: 4px 0 6px -4px rgba(0, 0, 0, .08);
+}
+
+/* Hover + selected backgrounds need to override the sticky cell bg, otherwise
+   the pinned columns look like they're not part of the row anymore. */
+.pa-table-grid tbody tr:hover td.pa-col-check,
+.pa-table-grid tbody tr:hover td.pa-col-product,
+.pa-table-grid tbody tr:hover td.pa-base-cell {
+  background: var(--surface-2);
+}
+.pa-table-grid tbody tr.pa-selected td.pa-col-check,
+.pa-table-grid tbody tr.pa-selected td.pa-col-product,
+.pa-table-grid tbody tr.pa-selected td.pa-base-cell {
+  background: var(--brand-50);
+}
+.pa-th-channel .channel-icon { width: 18px; height: 18px; font-size: 10px; }
+.pa-th-channel-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.pa-th-channel-primary { font-size: 12px; font-weight: 650; color: var(--text); }
+.pa-th-channel-secondary { font-size: 10.5px; font-weight: 500; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 110px; }
+.pa-th-filter.active { background: var(--brand-100, var(--brand-50)); color: var(--brand-700); }
+
+/* Details modal — min/default/max/base price strip */
+.pa-pricing-window {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+.pa-pw-cell { font-size: 13px; }
+
+/* ============= Right Panel ============= */
+.pa-right-empty {
+  padding: 80px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.pa-right-empty-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.pa-right-empty-sub {
+  font-size: 12.5px;
+  color: var(--text-3);
+  max-width: 240px;
+}
+.pa-right-empty-inline {
+  font-size: 12.5px;
+  padding: 24px 12px;
+  text-align: center;
+}
+.pa-right-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+.pa-right-head {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.pa-right-img {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  flex-shrink: 0;
+}
+.pa-right-img-fallback {
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: var(--text-3);
+  font-size: 18px;
+}
+.pa-right-eyebrow {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pa-right-title {
+  font-size: 14px;
+  font-weight: 650;
+  margin-top: 3px;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.pa-right-sub {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pa-right-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.pa-right-tabs button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.12s;
+}
+.pa-right-tabs button:hover { color: var(--text); }
+.pa-right-tabs button.active {
+  color: var(--brand-700);
+  border-bottom-color: var(--brand-600);
+}
+.pa-right-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+.pa-right-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pa-right-group {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.pa-right-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.pa-right-group-name {
+  font-weight: 650;
+  color: var(--text-2);
+}
+.pa-right-group-count {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.pa-right-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.pa-right-row:last-child { border-bottom: none; }
+.pa-right-active-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.pa-right-active-dot.pa-active { background: var(--success-fg); }
+.pa-right-active-dot.pa-inactive { background: var(--text-4); }
+
+/* Active/inactive switch — matches reference page's blue toggle */
+.pa-toggle {
+  width: 30px;
+  height: 16px;
+  border-radius: 999px;
+  border: none;
+  background: var(--text-4, #cbd5e1);
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: background .15s;
+}
+.pa-toggle.on { background: var(--brand-600); }
+.pa-toggle:disabled { opacity: .55; cursor: wait; }
+.pa-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform .15s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+}
+.pa-toggle.on .pa-toggle-knob { transform: translateX(14px); }
+
+/* Inactive row — visually de-emphasised */
+.pa-right-row-inactive {
+  opacity: 0.55;
+}
+.pa-right-row-inactive .pa-right-row-price { color: var(--text-3); }
+
+/* Per-account header — base price + delta chip */
+.pa-right-group-base {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.pa-delta-chip {
+  font-size: 10.5px;
+  font-weight: 650;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  margin-left: 6px;
+}
+.pa-delta-pos {
+  background: var(--success-bg);
+  color: var(--success-fg);
+}
+.pa-delta-neg {
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+}
+.pa-delta-neutral {
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+/* Base-price edit modal — per-account input grid */
+.pa-base-edit-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pa-base-edit-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  align-items: center;
+  gap: 14px;
+}
+.pa-base-edit-row label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.pa-base-edit-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.pa-base-edit-prefix {
+  position: absolute;
+  left: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.pa-base-edit-input .form-control { padding-left: 24px; }
+.pa-right-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.pa-right-row-sku {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.pa-right-sched-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--info-fg);
+}
+.pa-right-row-meta {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 1px;
+}
+.pa-right-row-price {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+
+/* History tab */
+.pa-right-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pa-right-history-row {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.pa-right-history-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.pa-right-history-meta {
+  display: flex;
+  gap: 6px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--text-3);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ============= Details Modal ============= */
+.pa-details {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pa-details-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 18px;
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+.pa-details-head-col { font-size: 12.5px; }
+.pa-details-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+  font-weight: 650;
+}
+.pa-details-value {
+  margin-top: 2px;
+  font-weight: 600;
+}
+.pa-details-value.mono { font-family: var(--font-mono); }
+.pa-details-price {
+  color: var(--danger-fg);
+  font-size: 15px;
+  font-weight: 700;
+}
+.pa-stat-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.pa-stat-card {
+  padding: 16px 18px;
+  border-radius: 12px;
+  color: #fff;
+}
+.pa-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.pa-stat-label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.pa-stat-sub {
+  font-size: 11px;
+  margin-top: 18px;
+  opacity: 0.92;
+}
+.pa-stat-blue { background: linear-gradient(135deg, #4f8cff 0%, #2563eb 100%); }
+.pa-stat-green { background: linear-gradient(135deg, #34d399 0%, #059669 100%); }
+.pa-stat-purple { background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%); }
+.pa-stat-up { background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); }
+.pa-stat-down { background: linear-gradient(135deg, #fb7185 0%, #be123c 100%); }
+.pa-stat-neutral { background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%); }
+
+/* Chart */
+.pa-chart-wrap {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px 18px;
+  background: var(--surface);
+}
+.pa-chart-title {
+  font-size: 14px;
+  font-weight: 650;
+  margin-bottom: 10px;
+}
+.pa-chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.pa-chart-empty {
+  padding: 60px 12px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+/* Responsive — collapse right panel below the table on narrow screens. */
+@media (max-width: 1100px) {
+  .pa-layout { grid-template-columns: 1fr; }
+  .pa-right-card { position: static; max-height: none; }
+  .pa-stat-cards { grid-template-columns: repeat(2, 1fr); }
+  .pa-details-head { grid-template-columns: 1fr; gap: 10px; }
+}
