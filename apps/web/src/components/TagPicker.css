@@ -1,0 +1,95 @@
+/* TagPicker — popover styling. The anchor span lets the popover position
+   itself relative to its trigger without forcing the trigger into a block
+   layout that would break inline tag rows. */
+
+.tag-picker-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tag-picker-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  min-width: 220px;
+  max-width: 280px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  font-size: 12.5px;
+}
+
+.tag-picker-head {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.tag-picker-body {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.tag-picker-empty {
+  padding: 14px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.tag-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+.tag-picker-row:hover { background: var(--surface-2); }
+.tag-picker-row.applied { background: var(--brand-50); }
+.tag-picker-row:disabled { opacity: 0.6; cursor: wait; }
+
+.tag-picker-check {
+  width: 14px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--brand-700);
+  font-size: 13px;
+}
+
+.tag-picker-spinner {
+  margin-left: auto;
+  color: var(--text-3);
+  letter-spacing: 1px;
+  font-size: 12px;
+}
+
+.tag-picker-foot {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 11.5px;
+}
+.tag-picker-foot a {
+  color: var(--brand-600);
+  font-weight: 600;
+  text-decoration: none;
+}
+.tag-picker-foot a:hover {
+  text-decoration: underline;
+  color: var(--brand-700);
+}

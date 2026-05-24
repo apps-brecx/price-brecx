@@ -176,8 +176,22 @@ export function LostBuyBox() {
   const progress = progressQ.data;
 
   const scan = useMutation({
-    mutationFn: () => api.post<{ ok: boolean }>("/lost-buybox/scan"),
-    onSuccess: () => {
+    mutationFn: () =>
+      api.post<{ ok: boolean; alreadyRunning?: boolean }>(
+        "/lost-buybox/scan",
+      ),
+    onSuccess: (res) => {
+      // Server dedupes: if a scan is already in flight we get back
+      //   { ok: false, alreadyRunning: true }
+      // Surface that as a friendly warning instead of pretending the click
+      // queued anything — without this users keep mashing the button.
+      if (res.alreadyRunning) {
+        toast.warning(
+          "Scan already running",
+          "A Buy Box scan is in progress for this workspace. It'll finish in a few minutes — no need to click again.",
+        );
+        return;
+      }
       qc.setQueryData<ScanProgress | null>(["lost-buybox", "progress"], {
         phase: "report",
         message: "Starting scan…",

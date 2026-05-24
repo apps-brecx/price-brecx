@@ -35,6 +35,13 @@ export function requestCancel(workspaceId: string): boolean {
   return true;
 }
 
+/** Whether a scan is currently in flight for the workspace. Used by the
+ *  /scan route + the 2-hourly cron to dedupe — without it pg-boss happily
+ *  queues a fresh job behind each click and the user sees scan after scan. */
+export function isScanActive(workspaceId: string): boolean {
+  return active.has(workspaceId);
+}
+
 /** Thrown by the scan when a cancel was requested — handled, not an error. */
 export class ScanCancelledError extends Error {
   constructor() {

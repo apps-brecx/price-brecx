@@ -7,7 +7,7 @@ import {
 } from "@fbm/shared";
 import { sql } from "../db.js";
 import { enqueueLostBuyboxScan } from "../jobs.js";
-import { requestCancel } from "../amazon/scanControl.js";
+import { requestCancel, isScanActive } from "../amazon/scanControl.js";
 
 const EMPTY_SUMMARY = {
   total: 0,
@@ -95,6 +95,13 @@ export default async function lostBuyboxRoutes(app: FastifyInstance) {
    * over the websocket ("lost_buybox_synced") when it finishes.
    */
   app.post("/lost-buybox/scan", async (req) => {
+    // Dedupe — if a scan is already in flight for this workspace, return
+    // a friendly "already running" instead of queuing another one. Without
+    // this a quick double-click or the cron firing mid-scan triggers a
+    // second pass right after the first finishes ("kotobar scanning cholbe?").
+    if (isScanActive(req.user!.workspaceId)) {
+      return { ok: false, alreadyRunning: true };
+    }
     await enqueueLostBuyboxScan({
       workspaceId: req.user!.workspaceId,
       actor: req.user!.email,

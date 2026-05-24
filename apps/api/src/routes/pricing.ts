@@ -1,12 +1,17 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { sql } from "../db.js";
+import { sql, jsonb } from "../db.js";
 import { recordActivity } from "../lib/activity.js";
 
 const bulkBaseSchema = z.object({
   nineyardItemId: z.number().int(),
   /** Per-account base prices. Null clears the base price for that account. */
   prices: z.record(z.string(), z.number().nullable()),
+});
+
+const applyTagSchema = z.object({
+  label: z.string().min(1).max(40).trim(),
+  color: z.string().min(1).max(20),
 });
 
 /**
@@ -247,6 +252,106 @@ export default async function pricingRoutes(app: FastifyInstance) {
     });
     return { ok: true, touched };
   });
+
+  /**
+   * Add a tag to every SKU under the given NineYard item. Idempotent — if a
+   * SKU already has a tag with the same label (case-insensitive), it is left
+   * untouched so we don't end up with duplicate chips.
+   */
+  app.post("/pricing/products/:nineyardItemId/tags", async (req, reply) => {
+    const wsId = req.user!.workspaceId;
+    const { nineyardItemId } = req.params as { nineyardItemId: string };
+    const id = parseInt(nineyardItemId, 10);
+    if (!Number.isFinite(id)) {
+      return reply.code(400).send({ error: "Invalid nineyardItemId" });
+    }
+    const body = applyTagSchema.parse(req.body);
+
+    // Pull the current tags for every matching SKU, splice the new label in
+    // when missing, write back. Smaller round-trip than expanding into
+    // jsonb_set arithmetic in pure SQL, and tag arrays are tiny.
+    const rows = await sql<
+      { id: string; tags: { label: string; color: string }[] }[]
+    >`
+      select id, tags from skus
+       where workspace_id = ${wsId}
+         and nineyard_item_id = ${id}
+    `;
+    let touched = 0;
+    for (const r of rows) {
+      const existing = r.tags ?? [];
+      if (existing.some((t) => t.label.toLowerCase() === body.label.toLowerCase())) {
+        continue;
+      }
+      const next = [...existing, { label: body.label, color: body.color }];
+      await sql`
+        update skus set tags = ${jsonb(next)}, updated_at = now()
+         where id = ${r.id}
+      `;
+      touched++;
+    }
+    if (rows.length === 0) {
+      return reply.code(404).send({ error: "No SKUs for that product" });
+    }
+    await recordActivity({
+      workspaceId: wsId,
+      actor: req.user!.email,
+      action: "updated",
+      entityType: "sku",
+      entityId: null,
+      summary: `Applied tag "${body.label}" to item ${id} — ${touched} SKUs`,
+      meta: { nineyardItemId: id, label: body.label, touched },
+    });
+    return { ok: true, touched };
+  });
+
+  /** Remove a tag from every SKU under the given NineYard item. Matches by
+   *  label case-insensitively so the picker UI stays forgiving. */
+  app.delete(
+    "/pricing/products/:nineyardItemId/tags/:label",
+    async (req, reply) => {
+      const wsId = req.user!.workspaceId;
+      const { nineyardItemId, label } = req.params as {
+        nineyardItemId: string;
+        label: string;
+      };
+      const id = parseInt(nineyardItemId, 10);
+      if (!Number.isFinite(id)) {
+        return reply.code(400).send({ error: "Invalid nineyardItemId" });
+      }
+      const decoded = decodeURIComponent(label);
+      const rows = await sql<
+        { id: string; tags: { label: string; color: string }[] }[]
+      >`
+        select id, tags from skus
+         where workspace_id = ${wsId}
+           and nineyard_item_id = ${id}
+      `;
+      let touched = 0;
+      for (const r of rows) {
+        const existing = r.tags ?? [];
+        const next = existing.filter(
+          (t) => t.label.toLowerCase() !== decoded.toLowerCase(),
+        );
+        if (next.length === existing.length) continue;
+        await sql`
+          update skus set tags = ${jsonb(next)}, updated_at = now()
+           where id = ${r.id}
+        `;
+        touched++;
+      }
+      await recordActivity({
+        workspaceId: wsId,
+        actor: req.user!.email,
+        action: "updated",
+        entityType: "sku",
+        entityId: null,
+        summary: `Removed tag "${decoded}" from item ${id} — ${touched} SKUs`,
+        meta: { nineyardItemId: id, label: decoded, touched },
+      });
+      return { ok: true, touched };
+    },
+  );
 }
 
 function emptyAgg() {

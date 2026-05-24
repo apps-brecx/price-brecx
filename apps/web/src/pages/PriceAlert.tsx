@@ -20,6 +20,7 @@ import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
 import { StatusBadge, Tags } from "../components/Badges";
 import { Modal } from "../components/Modal";
 import { PriceScheduleModal } from "../components/PriceScheduleModal";
+import { TagPicker, type LibraryTag } from "../components/TagPicker";
 
 /* ------------------------- Constants ------------------------- */
 
@@ -250,6 +251,35 @@ export function PriceAlert() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pricing", "grid"] });
     },
+  });
+
+  // Apply or remove a tag across every SKU of a product. The server fans
+  // out so we only need one HTTP call per toggle.
+  const [tagBusyLabel, setTagBusyLabel] = useState<string | null>(null);
+  const productTagMut = useMutation({
+    mutationFn: async (vars: {
+      nineyardItemId: number;
+      tag: LibraryTag;
+      apply: boolean;
+    }) => {
+      setTagBusyLabel(vars.tag.label);
+      try {
+        if (vars.apply) {
+          return await api.post<{ ok: true }>(
+            `/pricing/products/${vars.nineyardItemId}/tags`,
+            { label: vars.tag.label, color: vars.tag.color },
+          );
+        }
+        return await api.del<{ ok: true }>(
+          `/pricing/products/${vars.nineyardItemId}/tags/${encodeURIComponent(
+            vars.tag.label,
+          )}`,
+        );
+      } finally {
+        setTagBusyLabel(null);
+      }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pricing", "grid"] }),
   });
 
   // Bulk base-price update — accepts a per-account map and fans out on the
@@ -760,25 +790,43 @@ export function PriceAlert() {
                       />
                       <div className="pa-card-info">
                         <div className="pa-card-title">{p.name}</div>
-                        <div className="pa-tags-row">
+                        <div
+                          className="pa-tags-row"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <Tags tags={p.tags} />
-                          <button
-                            className="pa-add-tag-btn"
-                            title="Open SKUs page to edit tags"
-                            onClick={(e) => e.stopPropagation()}
+                          <TagPicker
+                            kind="price-alert"
+                            applied={p.tags}
+                            pendingLabel={tagBusyLabel}
+                            onToggle={(tag, applied) =>
+                              productTagMut.mutate({
+                                nineyardItemId: p.nineyardItemId,
+                                tag,
+                                apply: applied,
+                              })
+                            }
                           >
-                            <svg
-                              width="11"
-                              height="11"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2.5"
-                            >
-                              <line x1="12" y1="5" x2="12" y2="19" />
-                              <line x1="5" y1="12" x2="19" y2="12" />
-                            </svg>
-                          </button>
+                            {(open) => (
+                              <button
+                                className="pa-add-tag-btn"
+                                title="Add or remove a tag"
+                                onClick={open}
+                              >
+                                <svg
+                                  width="11"
+                                  height="11"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                >
+                                  <line x1="12" y1="5" x2="12" y2="19" />
+                                  <line x1="5" y1="12" x2="19" y2="12" />
+                                </svg>
+                              </button>
+                            )}
+                          </TagPicker>
                         </div>
                         <div className="pa-card-meta">
                           <span className="copy-btn pa-sku-copy">

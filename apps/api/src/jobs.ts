@@ -16,6 +16,7 @@ import { syncNineyardToSkus, nineyardReady } from "./nineyard/index.js";
 import {
   beginScan,
   endScan,
+  isScanActive,
   ScanCancelledError,
 } from "./amazon/scanControl.js";
 import { recordActivity } from "./lib/activity.js";
@@ -330,6 +331,22 @@ export async function startJobs(): Promise<void> {
         }
 
         const marketplaceId = env.MARKETPLACE_ID ?? null;
+
+        // Snapshot the previous scan's lost ASINs before overwriting them.
+        // We diff against this to surface only the *newly* lost items in
+        // the post-scan email — repeated losses don't re-spam the inbox.
+        const [prevRun] = await sql<
+          { rows: LostBuyboxRow[] | null }[]
+        >`
+          select rows from lost_buybox_runs where workspace_id = ${workspaceId}
+        `;
+        const prevAsinSet = new Set(
+          (prevRun?.rows ?? []).map((r) => r.asin.toUpperCase()),
+        );
+        const newlyLost = result.rows.filter(
+          (r) => !prevAsinSet.has(r.asin.toUpperCase()),
+        );
+
         await sql`
           insert into lost_buybox_runs
             (workspace_id, marketplace_id, seller_id, inventory_count,
@@ -370,10 +387,14 @@ export async function startJobs(): Promise<void> {
               "buybox_seller_id",
             )}
           `;
-          // Immediate email to the person who ran the scan (manual click).
-          // Hourly cron uses actor="system" → skipped here; daily digest
-          // (BUYBOX_ALERT_DIGEST_QUEUE) covers scheduled recipients.
-          if (actor.includes("@")) {
+          // Emails:
+          //   * Manual scan (actor with "@") → always email the actor with
+          //     the full current loss list, like before.
+          //   * Cron scan (actor="system") → email the workspace's configured
+          //     buybox_alert_settings.emails recipients, but ONLY for
+          //     newly-lost ASINs. Avoids re-spamming on every 2-hr tick when
+          //     the same items have been lost for days.
+          if (actor.includes("@") && result.rows.length > 0) {
             await sendMail({
               to: actor,
               subject: `[Buy Box] ${result.rows.length} ASIN${
@@ -392,6 +413,48 @@ export async function startJobs(): Promise<void> {
             }).catch((err) =>
               logger.error({ err }, "Buy Box loss email failed"),
             );
+          } else if (!actor.includes("@") && newlyLost.length > 0) {
+            // Cron-triggered: alert the configured recipients about the new
+            // losses only. Pulls from the same `buybox_alert_settings` row
+            // the digest already uses, so admins manage it in one place.
+            const [conf] = await sql<
+              { emails: string[]; enabled: boolean }[]
+            >`
+              select emails, enabled from buybox_alert_settings
+               where workspace_id = ${workspaceId}
+            `;
+            const recipients =
+              conf?.enabled && Array.isArray(conf?.emails)
+                ? conf.emails.filter((e) => e && e.includes("@"))
+                : [];
+            if (recipients.length > 0) {
+              await sendMail({
+                to: recipients,
+                subject: `[Buy Box] ${newlyLost.length} new ASIN${
+                  newlyLost.length === 1 ? "" : "s"
+                } just lost the Buy Box`,
+                html: buyBoxLossEmailHtml({
+                  rows: newlyLost,
+                  marketplaceId,
+                  reportUrl: `${appUrl}/buybox`,
+                }),
+                text: buyBoxLossEmailText({
+                  rows: newlyLost,
+                  marketplaceId,
+                  reportUrl: `${appUrl}/buybox`,
+                }),
+              }).catch((err) =>
+                logger.error({ err }, "Buy Box newly-lost email failed"),
+              );
+              logger.info(
+                {
+                  workspaceId,
+                  newlyLost: newlyLost.length,
+                  recipients: recipients.length,
+                },
+                "Buy Box newly-lost alert sent",
+              );
+            }
           }
         }
 
@@ -484,21 +547,39 @@ export async function startJobs(): Promise<void> {
       "nineyard 2-hourly cron fanned out",
     );
   });
+  // NineYard fires on the hour; Lost Buy Box is offset 30 min later so the
+  // two heaviest jobs don't compete for SP-API quota + DB writes at once.
   await boss.schedule(SYNC_NINEYARD_CRON_QUEUE, "0 */2 * * *");
 
-  // ---- Hourly auto-scan: fan out one scan per workspace ----
+  // ---- 2-hourly auto-scan: fan out one scan per workspace ----
+  // Cron 0 */2 * * * fires at 00:00, 02:00, 04:00 ... UTC. Halving the
+  // cadence from hourly halves SP-API report usage without meaningfully
+  // changing how quickly users find out about a lost Buy Box (the digest
+  // email is the primary alert channel anyway).
   await boss.createQueue(LOST_BUYBOX_CRON_QUEUE);
   await boss.work(LOST_BUYBOX_CRON_QUEUE, async () => {
     const wss = await sql<{ id: string }[]>`select id from workspaces`;
+    let queued = 0;
+    let skipped = 0;
     for (const w of wss) {
+      // Skip workspaces with an in-flight scan — otherwise the cron stacks
+      // a fresh job behind each long-running scan and the user sees scan
+      // after scan after scan.
+      if (isScanActive(w.id)) {
+        skipped++;
+        continue;
+      }
       await enqueueLostBuyboxScan({ workspaceId: w.id, actor: "system" });
+      queued++;
     }
     logger.info(
-      { workspaces: wss.length },
-      "lost-buybox hourly cron fanned out",
+      { workspaces: wss.length, queued, skipped },
+      "lost-buybox 2-hourly cron fanned out",
     );
   });
-  await boss.schedule(LOST_BUYBOX_CRON_QUEUE, "0 * * * *");
+  // Offset 30 min from NineYard's "0 */2" so Amazon SP-API quota isn't
+  // hammered by two heavy jobs simultaneously.
+  await boss.schedule(LOST_BUYBOX_CRON_QUEUE, "30 */2 * * *");
 
   // ---- Buy Box loss digest: emailed at each workspace's chosen time ----
   await boss.createQueue(BUYBOX_ALERT_DIGEST_QUEUE);

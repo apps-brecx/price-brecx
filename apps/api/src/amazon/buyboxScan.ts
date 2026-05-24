@@ -36,6 +36,10 @@ export interface ScanResult {
 
 const BATCH = 20;
 const PACE_MS = Number(process.env.SP_API_BATCH_DELAY_MS) || 3_000;
+/** How many in-flight batches at once. SP-API competitiveSummary's token
+ *  bucket allows short bursts, so 3 parallel chains finish in roughly 1/3
+ *  the wall time without tripping QuotaExceeded under normal load. */
+const PARALLELISM = Number(process.env.SP_API_BATCH_CONCURRENCY) || 3;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function isInactive(status: string): boolean {
@@ -54,40 +58,73 @@ async function runBatched(
   for (let i = 0; i < asins.length; i += BATCH) {
     chunks.push(asins.slice(i, i + BATCH));
   }
-  const allResponses: CompetitiveSummaryItem[] = [];
-  const allAsins: string[] = [];
+  /** Index → response slot, so we can re-assemble the parallel results back
+   *  into source-order. Sparse during the run, filled fully at the end. */
+  const responses: (CompetitiveSummaryItem | null)[] = new Array(
+    chunks.length * BATCH,
+  ).fill(null);
+  const asinsOut: (string | null)[] = new Array(chunks.length * BATCH).fill(
+    null,
+  );
+  let done = 0;
 
-  for (let i = 0; i < chunks.length; i++) {
+  async function processChunk(idx: number): Promise<void> {
     if (runCtl?.cancel) throw new ScanCancelledError();
-    const chunk = chunks[i];
+    const chunk = chunks[idx];
+    const base = idx * BATCH;
     try {
       const result = await amazon.getCompetitiveSummary(chunk);
-      allResponses.push(...result.responses);
-      allAsins.push(...chunk);
+      for (let j = 0; j < chunk.length; j++) {
+        responses[base + j] = result.responses[j] ?? null;
+        asinsOut[base + j] = chunk[j];
+      }
     } catch (err) {
-      // A whole-batch failure shouldn't abort the scan — synthesize error
-      // responses so these ASINs flow through to the retry pass instead.
       const msg = err instanceof Error ? err.message : String(err);
-      logger.warn({ batch: i + 1, msg }, "Buy Box batch failed");
-      for (const asin of chunk) {
-        allResponses.push({
+      logger.warn({ batch: idx + 1, msg }, "Buy Box batch failed");
+      for (let j = 0; j < chunk.length; j++) {
+        responses[base + j] = {
           status: { statusCode: 500 },
-          body: { asin, errors: [{ message: msg }] },
-        });
-        allAsins.push(asin);
+          body: { asin: chunk[j], errors: [{ message: msg }] },
+        };
+        asinsOut[base + j] = chunk[j];
       }
     }
+    done++;
     onProgress({
       phase,
-      message: `Checking Buy Box… batch ${i + 1}/${chunks.length}`,
-      processed: allAsins.length,
+      message:
+        phase === "retry"
+          ? `Retrying errored ASINs… ${done}/${chunks.length} batches`
+          : `Checking Buy Box… ${done}/${chunks.length} batches`,
+      processed: done * BATCH,
       total: asins.length,
-      batch: i + 1,
+      batch: done,
       totalBatches: chunks.length,
     });
-    if (i < chunks.length - 1) await sleep(paceMs);
   }
-  return { responses: allResponses, asins: allAsins };
+
+  // Run `PARALLELISM` chains; each pulls the next chunk off a shared queue
+  // with `paceMs` spacing between its own requests. Net throughput ≈
+  // PARALLELISM × (1 chunk per paceMs).
+  let next = 0;
+  async function chain() {
+    while (true) {
+      const i = next++;
+      if (i >= chunks.length) return;
+      await processChunk(i);
+      if (next < chunks.length) await sleep(paceMs);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(PARALLELISM, chunks.length) }, chain),
+  );
+
+  return {
+    responses: responses
+      .slice(0, done * BATCH)
+      .filter((r): r is CompetitiveSummaryItem => r != null),
+    asins: asinsOut.slice(0, done * BATCH).filter((a): a is string => a != null),
+  };
 }
 
 export async function runLostBuyboxScan(

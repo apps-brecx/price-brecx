@@ -15,6 +15,7 @@ import { StatusBadge, Tags } from "../components/Badges";
 import { Modal } from "../components/Modal";
 import { PriceScheduleModal } from "../components/PriceScheduleModal";
 import { BarcodeScanner } from "../components/BarcodeScanner";
+import { TagPicker } from "../components/TagPicker";
 import { useToast } from "../components/Toast";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200] as const;
@@ -81,8 +82,6 @@ export function SKUs() {
   const [draft, setDraft] = useState<SkuCreateInput>(emptyDraft);
   const [scheduleFor, setScheduleFor] = useState<Sku | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [tagModalOpen, setTagModalOpen] = useState(false);
-  const [tagDraft, setTagDraft] = useState("");
 
   // ---- Filters ----
   type ChannelKey =
@@ -337,31 +336,78 @@ export function SKUs() {
     return items.filter((s) => selected.has(s.id));
   }
 
-  const tagSelectedMut = useMutation({
-    mutationFn: async (newTag: string) => {
-      const label = newTag.trim();
-      if (!label) return { count: 0 };
-      const rows = selectedSkuRows();
-      // PATCH one SKU at a time — appends a new tag *object* `{label,color}`
-      // (not a string) so it matches the `tagSchema` on the server. Dedup by
-      // label so re-applying the same tag is a no-op.
-      let count = 0;
-      for (const s of rows) {
-        const existing = s.tags ?? [];
-        if (existing.some((t) => t.label === label)) continue;
-        const tags = [...existing, { label, color: "neutral" as const }];
-        await api.patch<Sku>(`/skus/${s.id}`, { tags });
-        count += 1;
+  /** Per-row tag toggle — PATCHes a single SKU's tags array. Tracks the
+   *  pending label per SKU id so the picker shows the right spinner when the
+   *  user has multiple pickers open or fires rapid clicks. */
+  const [rowTagBusy, setRowTagBusy] = useState<Record<string, string>>({});
+  const rowTagMut = useMutation({
+    mutationFn: async (vars: {
+      sku: Sku;
+      tag: { label: string; color: string };
+      apply: boolean;
+    }) => {
+      setRowTagBusy((prev) => ({ ...prev, [vars.sku.id]: vars.tag.label }));
+      try {
+        const existing = vars.sku.tags ?? [];
+        const next = vars.apply
+          ? existing.some(
+              (t) => t.label.toLowerCase() === vars.tag.label.toLowerCase(),
+            )
+            ? existing
+            : [...existing, vars.tag]
+          : existing.filter(
+              (t) => t.label.toLowerCase() !== vars.tag.label.toLowerCase(),
+            );
+        await api.patch<Sku>(`/skus/${vars.sku.id}`, { tags: next });
+      } finally {
+        setRowTagBusy((prev) => {
+          const { [vars.sku.id]: _, ...rest } = prev;
+          return rest;
+        });
       }
-      return { count };
     },
-    onSuccess: ({ count }) => {
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["skus"] }),
+    onError: (err) =>
+      toast.error(
+        "Couldn't update tag",
+        err instanceof Error ? err.message : "Try again.",
+      ),
+  });
+
+  /** Apply one library tag to every selected SKU. Dedup by label so
+   *  re-applying the same tag is a no-op. The tag itself comes from the
+   *  workspace tag library (Settings → Tags) so its color matches what the
+   *  user picked there. */
+  const [bulkTagBusy, setBulkTagBusy] = useState<string | null>(null);
+  const applyBulkTagMut = useMutation({
+    mutationFn: async (tag: { label: string; color: string }) => {
+      setBulkTagBusy(tag.label);
+      try {
+        const rows = selectedSkuRows();
+        let count = 0;
+        for (const s of rows) {
+          const existing = s.tags ?? [];
+          if (
+            existing.some(
+              (t) => t.label.toLowerCase() === tag.label.toLowerCase(),
+            )
+          ) {
+            continue;
+          }
+          const tags = [...existing, tag];
+          await api.patch<Sku>(`/skus/${s.id}`, { tags });
+          count += 1;
+        }
+        return { count, label: tag.label };
+      } finally {
+        setBulkTagBusy(null);
+      }
+    },
+    onSuccess: ({ count, label }) => {
       qc.invalidateQueries({ queryKey: ["skus"] });
-      setTagModalOpen(false);
-      setTagDraft("");
       toast.success(
         "Tag added",
-        `Applied to ${count} SKU${count === 1 ? "" : "s"}.`,
+        `Applied "${label}" to ${count} SKU${count === 1 ? "" : "s"}.`,
       );
     },
     onError: (err) =>
@@ -956,8 +1002,45 @@ export function SKUs() {
                         <span style={{ color: "var(--text-4)" }}>—</span>
                       )}
                     </td>
-                    <td>
-                      <Tags tags={s.tags} />
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 5,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <Tags tags={s.tags} />
+                        <TagPicker
+                          kind="sku"
+                          applied={s.tags ?? []}
+                          pendingLabel={rowTagBusy[s.id] ?? null}
+                          onToggle={(tag, applied) =>
+                            rowTagMut.mutate({ sku: s, tag, apply: applied })
+                          }
+                        >
+                          {(open) => (
+                            <button
+                              className="sku-tag-add"
+                              title="Add or remove a tag"
+                              onClick={open}
+                            >
+                              <svg
+                                width="10"
+                                height="10"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                              >
+                                <line x1="12" y1="5" x2="12" y2="19" />
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                              </svg>
+                            </button>
+                          )}
+                        </TagPicker>
+                      </div>
                     </td>
                     <td
                       style={{
@@ -1320,24 +1403,37 @@ export function SKUs() {
           <span>selected</span>
         </div>
         <div className="bulk-bar-actions">
-          <button
-            type="button"
-            title="Add a tag to the selected SKUs"
-            onClick={() => setTagModalOpen(true)}
+          <TagPicker
+            kind="sku"
+            applied={[]}
+            pendingLabel={bulkTagBusy}
+            onToggle={(tag, applied) => {
+              // Bulk mode is add-only — toggling off makes no sense across
+              // potentially heterogeneous selections, so we ignore removals.
+              if (applied) applyBulkTagMut.mutate(tag);
+            }}
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-              <line x1="7" y1="7" x2="7.01" y2="7" />
-            </svg>
-            Tag
-          </button>
+            {(open) => (
+              <button
+                type="button"
+                title="Add a tag from the library to the selected SKUs"
+                onClick={open}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                  <line x1="7" y1="7" x2="7.01" y2="7" />
+                </svg>
+                Tag
+              </button>
+            )}
+          </TagPicker>
           <button
             type="button"
             title="Export selected SKUs as CSV"
@@ -1399,55 +1495,6 @@ export function SKUs() {
         </div>
       </div>
 
-      {/* Tag modal — adds one tag to all selected SKUs */}
-      <Modal
-        open={tagModalOpen}
-        title="Add tag"
-        subtitle={`Will be added to ${selected.size} selected SKU${selected.size === 1 ? "" : "s"}.`}
-        onClose={() => {
-          setTagModalOpen(false);
-          setTagDraft("");
-        }}
-        footer={
-          <>
-            <button
-              className="btn btn-secondary"
-              onClick={() => {
-                setTagModalOpen(false);
-                setTagDraft("");
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary"
-              disabled={tagSelectedMut.isPending || !tagDraft.trim()}
-              onClick={() => tagSelectedMut.mutate(tagDraft)}
-            >
-              {tagSelectedMut.isPending ? "Tagging…" : "Apply tag"}
-            </button>
-          </>
-        }
-      >
-        <div className="form-group">
-          <label className="form-label">Tag</label>
-          <input
-            className="form-control"
-            placeholder="e.g. Spices"
-            autoFocus
-            value={tagDraft}
-            onChange={(e) => setTagDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && tagDraft.trim()) {
-                tagSelectedMut.mutate(tagDraft);
-              }
-            }}
-          />
-          <div className="form-help">
-            Appended to the SKU's existing tags. Duplicates are skipped.
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }

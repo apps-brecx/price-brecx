@@ -97,6 +97,39 @@ function findMyOffer(body: SummaryBody, sellerId: string): Offer | null {
   return null;
 }
 
+/**
+ * Best-effort inference when SP-API returns no featuredBuyingOptions but
+ * lowestPricedOffers still has active sellers — i.e. the product actually
+ * has a Buy Box on the storefront ("Add to cart" visible) and the listing
+ * just didn't surface via the featured-offer path. Returns the cheapest
+ * offer from a non-self seller; null if no rival is selling.
+ *
+ * Without this we mis-report those ASINs as "no_featured_offer" even though
+ * the customer experience clearly has a winner.
+ */
+function inferRivalFromLowest(
+  body: SummaryBody,
+  sellerId: string,
+): Offer | null {
+  const groups = body.lowestPricedOffers ?? [];
+  let best: Offer | null = null;
+  let bestPrice = Number.POSITIVE_INFINITY;
+  for (const g of groups) {
+    for (const o of g.offers ?? []) {
+      if (o.sellerId && o.sellerId === sellerId) continue;
+      const m = o.listingPrice;
+      const amt =
+        typeof m?.amount === "number" ? m.amount : Number(m?.amount);
+      if (!Number.isFinite(amt)) continue;
+      if (amt < bestPrice) {
+        bestPrice = amt;
+        best = o;
+      }
+    }
+  }
+  return best;
+}
+
 function analyzeResponse(
   response: CompetitiveSummaryItem,
   fallbackAsin: string,
@@ -121,31 +154,48 @@ function analyzeResponse(
 
   const featured = getFeaturedOffer(body);
   const myOffer = sellerId ? findMyOffer(body, sellerId) : null;
-  const buyBoxPrice = featured
-    ? getMoneyParts(featured.listingPrice)
-    : { amount: null, currency: null };
   const myPrice = myOffer
     ? getMoneyParts(myOffer.listingPrice)
     : { amount: null, currency: null };
 
   let missed = false;
   let reason: AnalyzedRow["reason"] = "won";
-  if (!featured) {
-    missed = true;
-    reason = "no_featured_offer";
-  } else if (!featured.sellerId) {
-    missed = true;
-    reason = "unknown_winner_anonymized";
-  } else if (featured.sellerId !== sellerId) {
-    missed = true;
-    reason = "other_seller_winning";
+  let buyBoxPrice = featured
+    ? getMoneyParts(featured.listingPrice)
+    : { amount: null, currency: null };
+  let buyboxSellerId: string | null = featured?.sellerId ?? null;
+
+  if (featured) {
+    if (!featured.sellerId) {
+      missed = true;
+      reason = "unknown_winner_anonymized";
+    } else if (featured.sellerId !== sellerId) {
+      missed = true;
+      reason = "other_seller_winning";
+    }
+  } else {
+    // No featuredBuyingOptions in the response. Before reporting "no
+    // featured offer" (which the user often disputes — the storefront
+    // shows "Add to cart" because a competing seller has the Buy Box),
+    // see if lowestPricedOffers has any rival selling the item. If so,
+    // treat the cheapest rival offer as the de-facto winner.
+    const rival = sellerId ? inferRivalFromLowest(body, sellerId) : null;
+    if (rival) {
+      missed = true;
+      reason = "other_seller_winning";
+      buyboxSellerId = rival.sellerId ?? null;
+      buyBoxPrice = getMoneyParts(rival.listingPrice);
+    } else {
+      missed = true;
+      reason = "no_featured_offer";
+    }
   }
 
   return {
     asin,
     missed,
     reason,
-    buyboxSellerId: featured?.sellerId ?? null,
+    buyboxSellerId,
     buyboxPrice: buyBoxPrice.amount,
     myPrice: myPrice.amount,
   };

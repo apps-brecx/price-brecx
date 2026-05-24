@@ -349,3 +349,26 @@
   color: #fff;
   background: rgba(255, 255, 255, 0.08);
 }
+
+/* Per-row "add tag" button on the SKUs table — small dashed-circle "+"
+   to match the same affordance on the Pricing card. */
+.sku-tag-add {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px dashed var(--border-strong, var(--border));
+  background: var(--surface);
+  color: var(--text-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.12s;
+}
+.sku-tag-add:hover {
+  border-color: var(--brand-500);
+  color: var(--brand-600);
+  background: var(--brand-50);
+  border-style: solid;
+}
