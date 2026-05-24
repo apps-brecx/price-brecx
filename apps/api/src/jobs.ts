@@ -59,6 +59,9 @@ export const SYNC_AMAZON_QUEUE = "sync-amazon";
 /** Consolidated NineYard sync — replaces the per-stage Amazon SP-API pipeline
  *  when NineYard credentials are configured (NY_EMAIL / NY_PASSWORD / NY_COMPANY_ID). */
 export const SYNC_NINEYARD_QUEUE = "sync-nineyard";
+/** Cron fan-out: every 2 hours, enqueues a NineYard sync job for every
+ *  workspace. Matches the reference app's reported 2-3hr sync cadence. */
+export const SYNC_NINEYARD_CRON_QUEUE = "sync-nineyard-cron";
 export const LOST_BUYBOX_SCAN_QUEUE = "lost-buybox-scan";
 /** Hourly fan-out: enqueues a Lost Buy Box scan for every workspace. */
 export const LOST_BUYBOX_CRON_QUEUE = "lost-buybox-cron";
@@ -457,6 +460,31 @@ export async function startJobs(): Promise<void> {
       }
     },
   );
+
+  // -------------- NineYard 2-hourly auto-sync cron --------------
+  // Fans out a NineYard inventory sync to every workspace. UTC "0 */2 * * *"
+  // fires at 00:00, 02:00, 04:00 … — matches the reference app's reported
+  // 2-3hr cadence. Only fires when NineYard creds are configured (otherwise
+  // the worker no-ops via `nineyardReady()`).
+  await boss.createQueue(SYNC_NINEYARD_CRON_QUEUE);
+  await boss.work(SYNC_NINEYARD_CRON_QUEUE, async () => {
+    if (!nineyardReady()) {
+      logger.info("NineYard cron tick — creds missing, skipping fan-out");
+      return;
+    }
+    const wss = await sql<{ id: string }[]>`select id from workspaces`;
+    for (const w of wss) {
+      await getBoss().send(SYNC_NINEYARD_QUEUE, {
+        workspaceId: w.id,
+        actor: "system",
+      });
+    }
+    logger.info(
+      { workspaces: wss.length },
+      "nineyard 2-hourly cron fanned out",
+    );
+  });
+  await boss.schedule(SYNC_NINEYARD_CRON_QUEUE, "0 */2 * * *");
 
   // ---- Hourly auto-scan: fan out one scan per workspace ----
   await boss.createQueue(LOST_BUYBOX_CRON_QUEUE);

@@ -114,6 +114,9 @@ interface GridRow {
   totalStock: number;
   qtyOnHand: number;
   inboundStock: number;
+  /** Per-warehouse stock map keyed by NineYard warehouse name.
+   *  Example: { "Brecx FBM": 45, "Brecx-Shelves": 0 }. */
+  warehouseStock: Record<string, number>;
   tags: { label: string; color: string }[];
   listings: Listing[];
 }
@@ -789,12 +792,34 @@ export function PriceAlert() {
                               <strong>{p.brand}</strong>
                             </span>
                           )}
-                          <span className="pa-meta-pill">
-                            <span style={{ color: "var(--text-3)" }}>
-                              Stock:
-                            </span>{" "}
-                            <strong>{num(p.totalStock)}</strong>
-                          </span>
+                          {/* Per-warehouse pills (FBM, Shelves, …) — drop the
+                              "Brecx " prefix the company uses on every
+                              warehouse so the labels stay readable. Falls back
+                              to the aggregate totalStock pill when warehouse
+                              data hasn't been synced yet. */}
+                          {Object.keys(p.warehouseStock).length > 0 ? (
+                            Object.entries(p.warehouseStock).map(
+                              ([wh, qty]) => {
+                                const label =
+                                  wh.replace(/^Brecx[\s-]+/i, "").trim() || wh;
+                                return (
+                                  <span key={wh} className="pa-meta-pill">
+                                    <span style={{ color: "var(--text-3)" }}>
+                                      {label}:
+                                    </span>{" "}
+                                    <strong>{num(qty)}</strong>
+                                  </span>
+                                );
+                              },
+                            )
+                          ) : (
+                            <span className="pa-meta-pill">
+                              <span style={{ color: "var(--text-3)" }}>
+                                Stock:
+                              </span>{" "}
+                              <strong>{num(p.totalStock)}</strong>
+                            </span>
+                          )}
                           <span className="pa-meta-pill">
                             <span style={{ color: "var(--text-3)" }}>
                               SKUs:

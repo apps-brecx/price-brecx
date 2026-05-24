@@ -2,6 +2,7 @@ import { env } from "../env.js";
 import { logger } from "../logger.js";
 import type {
   NyApiSku,
+  NyItemLocation,
   NyItemsResponse,
   NySkuMapping,
   NyToken,
@@ -156,6 +157,15 @@ export async function* iterateAllItems(perPage = 100) {
  * chunk shouldn't lose the work of the previous (potentially expensive) sync
  * stages.
  */
+/** Per-warehouse stock for a single master item. NineYard's
+ *  GetItemLocations endpoint accepts exactly one ItemId per call, so the
+ *  sync layer parallel-batches these. */
+export function getItemLocations(itemId: number): Promise<NyItemLocation[]> {
+  return nyFetch<NyItemLocation[]>(
+    `/api/Items/GetItemLocations?ItemId=${itemId}`,
+  );
+}
+
 export async function getSkuMappings(
   accountSkuIds: number[],
   chunkSize = 50,

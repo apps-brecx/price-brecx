@@ -84,3 +84,18 @@ export interface NySkuMapping {
   accountSkuId: number;
   mappedItems: { itemId: number; name: string; qty: number }[];
 }
+
+/** /api/Items/GetItemLocations response: per-warehouse stock breakdown
+ *  for a single master item. Returned as an array of locations; the sync
+ *  groups them by `warehouseName` into a flat map. */
+export interface NyItemLocation {
+  warehouseName: string | null;
+  locationCode: string | null;
+  locationName: string | null;
+  qty: number;
+  lastUpdate: string | null;
+  locationId: number;
+  warehouseId: number;
+  itemId: number;
+  note: string | null;
+}

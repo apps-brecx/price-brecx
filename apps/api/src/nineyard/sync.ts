@@ -15,11 +15,12 @@
  * User-owned fields (favorite, tags, base_price, cost overrides) are never
  * touched. All other columns reflect the upstream NineYard state.
  */
-import { sql } from "../db.js";
+import { sql, jsonb } from "../db.js";
 import { logger } from "../logger.js";
 import {
   iterateAllItems,
   iterateAllSkus,
+  getItemLocations,
   getSkuMappings,
   nineyardReady,
 } from "./client.js";
@@ -29,6 +30,7 @@ export interface NinyardSyncSummary {
   items: number;
   skus: number;
   mapped: number;
+  warehouseItems: number;
   mode: "live" | "skipped";
 }
 
@@ -360,6 +362,57 @@ async function applyMappings(workspaceId: string): Promise<number> {
   return touched;
 }
 
+/* ----------------------- Warehouse stock stage ------------------- */
+
+/**
+ * Per-master-item warehouse stock. NineYard's /api/Items/GetItemLocations
+ * accepts only one ItemId per call, so we fan out in parallel chunks. The
+ * result is flattened to `{ warehouseName: qty }` and stored on the item row.
+ */
+async function syncItemLocations(
+  workspaceId: string,
+): Promise<number> {
+  const items = await sql<{ id: string; ny: number }[]>`
+    select id, nineyard_item_id as "ny"
+      from nineyard_items
+     where workspace_id = ${workspaceId}
+       and delete_flag = false
+  `;
+  if (items.length === 0) return 0;
+
+  const PARALLEL = 6;
+  let touched = 0;
+  for (let i = 0; i < items.length; i += PARALLEL) {
+    const batch = items.slice(i, i + PARALLEL);
+    const results = await Promise.allSettled(
+      batch.map(async (it) => {
+        const locs = await getItemLocations(it.ny);
+        const map: Record<string, number> = {};
+        for (const l of locs) {
+          if (!l.warehouseName) continue;
+          map[l.warehouseName] = (map[l.warehouseName] ?? 0) + l.qty;
+        }
+        return { id: it.id, map };
+      }),
+    );
+    for (const r of results) {
+      if (r.status !== "fulfilled") continue;
+      // postgres.js double-encodes when given a JSON-stringified value with
+      // `::jsonb` — the value lands as a JSON *string* containing the object,
+      // not the object itself. The shared `jsonb()` helper (db.ts) uses
+      // sql.json() which binds the object correctly as jsonb.
+      await sql`
+        update nineyard_items
+           set warehouse_stock = ${jsonb(r.value.map)},
+               updated_at = now()
+         where id = ${r.value.id}
+      `;
+      touched++;
+    }
+  }
+  return touched;
+}
+
 /* ---------------------- top-level orchestrator -------------------- */
 
 export async function syncNineyardToSkus(
@@ -367,7 +420,13 @@ export async function syncNineyardToSkus(
 ): Promise<NinyardSyncSummary> {
   if (!nineyardReady()) {
     logger.warn("NineYard sync skipped: credentials missing");
-    return { items: 0, skus: 0, mapped: 0, mode: "skipped" };
+    return {
+      items: 0,
+      skus: 0,
+      mapped: 0,
+      warehouseItems: 0,
+      mode: "skipped",
+    };
   }
 
   // Stage 1 — master inventory items
@@ -390,5 +449,13 @@ export async function syncNineyardToSkus(
   const mapped = await applyMappings(workspaceId);
   logger.info({ workspaceId, mapped }, "NineYard mappings applied");
 
-  return { items, skus: skuCount, mapped, mode: "live" };
+  // Stage 4 — per-item warehouse stock breakdown (FBM, Shelves, …).
+  // Slowest stage; ~250ms per item × 6-parallel ≈ 1-2 min for ~930 items.
+  const warehouseItems = await syncItemLocations(workspaceId);
+  logger.info(
+    { workspaceId, warehouseItems },
+    "NineYard item locations synced",
+  );
+
+  return { items, skus: skuCount, mapped, warehouseItems, mode: "live" };
 }

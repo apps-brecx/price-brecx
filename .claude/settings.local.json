@@ -48,7 +48,10 @@
       "Bash(cp \"C:/DEV/DEV/priceobo-working_branch/price-scheduling-client/src/assets/images/Tiktok.png\" c:/DEV/DEV/price-brecx/apps/web/src/assets/marketplaces/tiktok.png)",
       "Bash(cp \"C:/DEV/DEV/priceobo-working_branch/price-scheduling-client/src/assets/images/Ebay.png\" c:/DEV/DEV/price-brecx/apps/web/src/assets/marketplaces/ebay.png)",
       "Bash(grep -n \"channel-icon \\\\${meta.cls}\\\\|channel-icon \\\\${channelMeta.cls}\" apps/web/src/pages/PriceAlert.tsx)",
-      "Bash(grep -n \"channel-icon \\\\${channelMeta.cls}\\\\|channel-icon \\\\${meta.cls}\" apps/web/src/pages/PriceAlert.tsx)"
+      "Bash(grep -n \"channel-icon \\\\${channelMeta.cls}\\\\|channel-icon \\\\${meta.cls}\" apps/web/src/pages/PriceAlert.tsx)",
+      "Bash(curl -s https://backyard.nineyard.com/swagger/v1/swagger.json -o /tmp/swag.json)",
+      "Bash(rm -f /tmp/swag.json)",
+      "Bash(curl -s https://backyard.nineyard.com/swagger/v1/swagger.json -o ./_swag.json)"
     ]
   }
 }

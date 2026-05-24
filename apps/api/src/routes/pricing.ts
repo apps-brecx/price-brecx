@@ -41,6 +41,7 @@ export default async function pricingRoutes(app: FastifyInstance) {
         totalStock: number;
         qtyOnHand: number;
         inboundStock: number;
+        warehouseStock: Record<string, number>;
         updatedAt: string;
       }[]
     >`
@@ -50,6 +51,7 @@ export default async function pricingRoutes(app: FastifyInstance) {
              total_stock as "totalStock",
              qty_on_hand as "qtyOnHand",
              inbound_stock as "inboundStock",
+             warehouse_stock as "warehouseStock",
              updated_at as "updatedAt"
       from nineyard_items
       where workspace_id = ${wsId}
@@ -158,6 +160,7 @@ export default async function pricingRoutes(app: FastifyInstance) {
         totalStock: it.totalStock,
         qtyOnHand: it.qtyOnHand,
         inboundStock: it.inboundStock,
+        warehouseStock: it.warehouseStock ?? {},
         tags: [...tagMap.values()],
         listings: listings.map((l) => ({
           skuId: l.id,
