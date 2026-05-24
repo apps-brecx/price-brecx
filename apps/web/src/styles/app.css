@@ -114,6 +114,34 @@
 .tag-blue { background: var(--info-bg); border-color:var(--info-border); color:var(--info-fg); }
 .tag-green { background: var(--success-bg); border-color:var(--success-border); color:var(--success-fg); }
 .tag-orange { background:#fff7ed; border-color:#fed7aa; color:#c2410c; }
+.tag-gray { background:#f3f4f6; border-color:#e5e7eb; color:#374151; }
+.tag-yellow { background:#fef9c3; border-color:#fde68a; color:#854d0e; }
+.tag-red { background:#fee2e2; border-color:#fecaca; color:#b91c1c; }
+.tag-purple { background:#f3e8ff; border-color:#e9d5ff; color:#7e22ce; }
+.tag-pink { background:#fce7f3; border-color:#fbcfe8; color:#be185d; }
+.tag-teal { background:#ccfbf1; border-color:#99f6e4; color:#0f766e; }
+
+/* Tag color swatches — small circular buttons used by Settings → Tags
+   when the user picks the color for a new or edited tag. */
+.tag-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  transition: transform .1s;
+}
+.tag-swatch:hover { transform: scale(1.1); }
+.tag-swatch-gray { background:#9ca3af; }
+.tag-swatch-blue { background: var(--info-fg); }
+.tag-swatch-green { background: var(--success-fg); }
+.tag-swatch-yellow { background:#eab308; }
+.tag-swatch-orange { background:#f97316; }
+.tag-swatch-red { background:#ef4444; }
+.tag-swatch-purple { background:#a855f7; }
+.tag-swatch-pink { background:#ec4899; }
+.tag-swatch-teal { background:#14b8a6; }
 
 
 /* ---------- Table ---------- */

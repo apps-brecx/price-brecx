@@ -24,15 +24,40 @@ export interface SessionUser {
   workspaceId: string;
 }
 
-export async function createSession(userId: string): Promise<string> {
+export async function createSession(
+  userId: string,
+  meta?: { ip?: string | null; userAgent?: string | null },
+): Promise<string> {
   const token = randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 86400_000);
   await sql`
-    insert into sessions (token_hash, user_id, expires_at)
-    values (${tokenHash}, ${userId}, ${expiresAt})
+    insert into sessions (token_hash, user_id, expires_at, ip, user_agent)
+    values (${tokenHash}, ${userId}, ${expiresAt},
+            ${meta?.ip ?? null}, ${meta?.userAgent ?? null})
   `;
   return token;
+}
+
+/** Bump last_seen_at on the active session so the Security page's session
+ *  list shows when each device was last used. Best-effort — failures are
+ *  swallowed so a transient DB error never breaks an authenticated request. */
+export async function touchSession(token: string | undefined): Promise<void> {
+  if (!token) return;
+  try {
+    await sql`
+      update sessions set last_seen_at = now()
+       where token_hash = ${hashToken(token)}
+    `;
+  } catch {
+    /* non-critical, ignore */
+  }
+}
+
+/** Public form of hashToken for callers that need to identify a session by
+ *  its plaintext token cookie without re-implementing the SHA-256 step. */
+export function tokenFingerprint(token: string): string {
+  return hashToken(token);
 }
 
 export async function resolveSession(

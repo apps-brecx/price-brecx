@@ -18,7 +18,7 @@ import {
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useToast } from "../components/Toast";
-import { date } from "../lib/format";
+import { date, relativeTime } from "../lib/format";
 import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
 
@@ -397,19 +397,16 @@ export function Settings() {
             Workspace
           </div>
           {navItem("users", "Users", team.length)}
-          {navItem("billing", "Billing")}
           {navItem("notifications", "Notifications")}
           {navItem("tags", "Tags")}
 
-          <div style={{ ...labelStyle, padding: "12px 10px 8px" }}>
-            Integrations
-          </div>
-          {navItem(
-            "marketplaces",
-            "Marketplaces",
-            marketplaces?.items.length,
-          )}
-          {navItem("api", "API & Webhooks")}
+          {/* Hidden by request — code below still renders these tabs so the
+              feature can be revealed later by re-adding the nav items:
+                {navItem("billing", "Billing")}
+                {navItem("marketplaces", "Marketplaces", marketplaces?.items.length)}
+                {navItem("api", "API & Webhooks")}
+              Integrations group label was the only thing pinning them, so it
+              goes too. */}
         </div>
 
         {/* Content pane */}
@@ -529,9 +526,7 @@ export function Settings() {
                 </div>
               )}
 
-              {tab === "security" && (
-                <NotAvailable feature="Security" />
-              )}
+              {tab === "security" && <SecurityPanel />}
 
               {tab === "users" && (
                 <div
@@ -1096,7 +1091,7 @@ export function Settings() {
                 </div>
               )}
 
-              {tab === "tags" && <NotAvailable feature="Tags" />}
+              {tab === "tags" && <TagsPanel />}
 
               {tab === "marketplaces" && (
                 <div className="card">
@@ -1640,6 +1635,737 @@ export function Settings() {
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+/* =====================================================================
+   Tags library panel — three sub-sections (SKU / Buy Box / Price Alert),
+   each its own CRUD list with a label input, a color picker, and inline
+   edit/delete. Backed by /tags/:kind on the API.
+   ===================================================================== */
+
+const TAG_COLORS = [
+  "gray",
+  "blue",
+  "green",
+  "yellow",
+  "orange",
+  "red",
+  "purple",
+  "pink",
+  "teal",
+] as const;
+type TagColor = (typeof TAG_COLORS)[number];
+
+interface TagRow {
+  id: string;
+  label: string;
+  color: TagColor;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const TAG_KINDS: { id: "sku" | "buybox" | "price-alert"; title: string; subtitle: string }[] = [
+  {
+    id: "sku",
+    title: "SKU Tags",
+    subtitle: "Applied on the SKUs page to flag individual marketplace listings.",
+  },
+  {
+    id: "buybox",
+    title: "Buy Box Tags",
+    subtitle: "Applied on the Buy Box Alert page to categorise lost-buybox ASINs.",
+  },
+  {
+    id: "price-alert",
+    title: "Price Alert Tags",
+    subtitle: "Applied on the Pricing page to label products across marketplaces.",
+  },
+];
+
+function TagsPanel() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {TAG_KINDS.map((k) => (
+        <TagCatalogCard key={k.id} kind={k.id} title={k.title} subtitle={k.subtitle} />
+      ))}
+    </div>
+  );
+}
+
+function TagCatalogCard({
+  kind,
+  title,
+  subtitle,
+}: {
+  kind: "sku" | "buybox" | "price-alert";
+  title: string;
+  subtitle: string;
+}) {
+  const qc = useQueryClient();
+  const queryKey = ["tag-library", kind] as const;
+  const [label, setLabel] = useState("");
+  const [color, setColor] = useState<TagColor>("blue");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editLabel, setEditLabel] = useState("");
+  const [editColor, setEditColor] = useState<TagColor>("blue");
+  const [createErr, setCreateErr] = useState<string | null>(null);
+
+  const query = useQuery({
+    queryKey,
+    queryFn: () => api.get<{ items: TagRow[] }>(`/tags/${kind}`),
+  });
+
+  const createMut = useMutation({
+    mutationFn: (body: { label: string; color: TagColor }) =>
+      api.post<{ id: string }>(`/tags/${kind}`, body),
+    onSuccess: () => {
+      setLabel("");
+      setColor("blue");
+      setCreateErr(null);
+      qc.invalidateQueries({ queryKey });
+    },
+    onError: (e: Error) => setCreateErr(e.message),
+  });
+  const editMut = useMutation({
+    mutationFn: ({
+      id,
+      label,
+      color,
+    }: {
+      id: string;
+      label: string;
+      color: TagColor;
+    }) => api.patch<TagRow>(`/tags/${kind}/${id}`, { label, color }),
+    onSuccess: () => {
+      setEditingId(null);
+      qc.invalidateQueries({ queryKey });
+    },
+  });
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.del<{ ok: true }>(`/tags/${kind}/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey }),
+  });
+
+  const items = query.data?.items ?? [];
+
+  function startEdit(t: TagRow) {
+    setEditingId(t.id);
+    setEditLabel(t.label);
+    setEditColor(t.color);
+  }
+  function saveEdit() {
+    if (!editingId) return;
+    editMut.mutate({ id: editingId, label: editLabel, color: editColor });
+  }
+  function submitCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!label.trim()) return;
+    createMut.mutate({ label: label.trim(), color });
+  }
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">{title}</div>
+        <div className="card-subtitle">{subtitle}</div>
+      </div>
+
+      {/* Create form */}
+      <div
+        className="card-body"
+        style={{ borderBottom: "1px solid var(--border)" }}
+      >
+        <form
+          onSubmit={submitCreate}
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div className="form-group" style={{ flex: "1 1 240px", margin: 0 }}>
+            <label className="form-label">New tag label</label>
+            <input
+              className="form-control"
+              placeholder="e.g. FBM, SF Case-6, Custom"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              maxLength={40}
+            />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Color</label>
+            <ColorPicker value={color} onChange={setColor} />
+          </div>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={!label.trim() || createMut.isPending}
+          >
+            {createMut.isPending ? "Adding…" : "Add tag"}
+          </button>
+        </form>
+        {createErr && (
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              color: "var(--danger-fg)",
+            }}
+          >
+            {createErr}
+          </div>
+        )}
+      </div>
+
+      {/* Existing list */}
+      <div className="card-body" style={{ padding: 0 }}>
+        {query.isLoading ? (
+          <div style={{ padding: 14 }}>
+            <Loading />
+          </div>
+        ) : items.length === 0 ? (
+          <div
+            style={{
+              padding: 20,
+              fontSize: 13,
+              color: "var(--text-3)",
+              textAlign: "center",
+            }}
+          >
+            No tags yet — add one above.
+          </div>
+        ) : (
+          items.map((t) => (
+            <div
+              key={t.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 16px",
+                borderTop: "1px solid var(--border)",
+              }}
+            >
+              {editingId === t.id ? (
+                <>
+                  <input
+                    className="form-control"
+                    style={{ maxWidth: 220, height: 32 }}
+                    value={editLabel}
+                    onChange={(e) => setEditLabel(e.target.value)}
+                    maxLength={40}
+                  />
+                  <ColorPicker value={editColor} onChange={setEditColor} />
+                  <div style={{ flex: 1 }} />
+                  <button
+                    className="btn btn-primary btn-xs"
+                    disabled={editMut.isPending || !editLabel.trim()}
+                    onClick={saveEdit}
+                  >
+                    {editMut.isPending ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-xs"
+                    onClick={() => setEditingId(null)}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className={`tag tag-${t.color}`}>{t.label}</span>
+                  <div style={{ flex: 1 }} />
+                  <button
+                    className="btn btn-secondary btn-xs"
+                    onClick={() => startEdit(t)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-xs"
+                    style={{
+                      color: "var(--danger-fg)",
+                      borderColor: "var(--danger-border)",
+                    }}
+                    disabled={deleteMut.isPending}
+                    onClick={() => {
+                      if (confirm(`Delete tag "${t.label}"?`)) {
+                        deleteMut.mutate(t.id);
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                </>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Color swatch picker. Renders all available tag colors as inline circular
+ *  swatches; the active one gets a ring. */
+function ColorPicker({
+  value,
+  onChange,
+}: {
+  value: TagColor;
+  onChange: (c: TagColor) => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+      {TAG_COLORS.map((c) => (
+        <button
+          key={c}
+          type="button"
+          className={"tag-swatch tag-swatch-" + c}
+          aria-label={c}
+          title={c}
+          onClick={() => onChange(c)}
+          style={{
+            outline: value === c ? "2px solid var(--brand-600)" : "none",
+            outlineOffset: 1,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* =====================================================================
+   Security panel — change password, active sessions, login history.
+   Composed inline as a sub-component so it can use react-query hooks
+   without polluting the main Settings component's mutation list.
+   ===================================================================== */
+
+interface SessionItem {
+  tokenHash: string;
+  createdAt: string;
+  expiresAt: string;
+  lastSeenAt: string;
+  ip: string | null;
+  userAgent: string | null;
+  country: string | null;
+  city: string | null;
+  current: boolean;
+}
+interface LoginEvent {
+  id: string;
+  createdAt: string;
+  summary: string;
+  meta: { ip?: string | null; userAgent?: string | null } | null;
+}
+
+/** Very lightweight UA → short label. We only do it client-side because the
+ *  raw user_agent string is ugly to surface as-is. OS detection extracts
+ *  the Windows NT version (NT 10.0 = Windows 10/11, NT 6.1 = Windows 7, …)
+ *  since that's the only OS detail UAs still expose; macOS has been frozen
+ *  at 10.15.7 by every browser for years so we don't bother showing it. */
+function uaLabel(ua: string | null | undefined): string {
+  if (!ua) return "Unknown device";
+  const browser =
+    /Edg\//.test(ua) ? "Edge" :
+    /OPR\/|Opera\//.test(ua) ? "Opera" :
+    /Chrome\//.test(ua) ? "Chrome" :
+    /Firefox\//.test(ua) ? "Firefox" :
+    /Safari\//.test(ua) ? "Safari" :
+    "Browser";
+  let os: string;
+  const winMatch = ua.match(/Windows NT (\d+\.\d+)/);
+  if (winMatch) {
+    const nt = winMatch[1];
+    const winName =
+      nt === "10.0" ? "Windows 10/11" :
+      nt === "6.3" ? "Windows 8.1" :
+      nt === "6.2" ? "Windows 8" :
+      nt === "6.1" ? "Windows 7" :
+      nt === "6.0" ? "Windows Vista" :
+      nt === "5.1" ? "Windows XP" :
+      "Windows";
+    os = winName;
+  } else if (/Mac OS|Macintosh/.test(ua)) {
+    os = "macOS";
+  } else if (/Android/.test(ua)) {
+    const m = ua.match(/Android (\d+(?:\.\d+)?)/);
+    os = m ? `Android ${m[1]}` : "Android";
+  } else if (/iPhone|iPad|iOS/.test(ua)) {
+    const m = ua.match(/OS (\d+)_(\d+)/);
+    os = m ? `iOS ${m[1]}.${m[2]}` : "iOS";
+  } else if (/Linux/.test(ua)) {
+    os = "Linux";
+  } else {
+    os = "Unknown OS";
+  }
+  return `${browser} on ${os}`;
+}
+
+/** Format the resolved geo into a single line, gracefully handling either
+ *  field being null. */
+function geoLabel(country: string | null, city: string | null): string | null {
+  if (!country && !city) return null;
+  if (country && city) return `${city}, ${country}`;
+  return country ?? city;
+}
+
+function SecurityPanel() {
+  const qc = useQueryClient();
+  const [curr, setCurr] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [pwMsg, setPwMsg] = useState<{
+    kind: "ok" | "err";
+    text: string;
+  } | null>(null);
+
+  const sessionsQuery = useQuery({
+    queryKey: ["me-sessions"],
+    queryFn: () => api.get<{ items: SessionItem[] }>("/me/sessions"),
+  });
+  const historyQuery = useQuery({
+    queryKey: ["me-login-history"],
+    queryFn: () => api.get<{ items: LoginEvent[] }>("/me/login-history"),
+  });
+
+  const changePwMut = useMutation({
+    mutationFn: (body: { currentPassword: string; newPassword: string }) =>
+      api.post<{ ok: true }>("/me/change-password", body),
+    onSuccess: () => {
+      setPwMsg({
+        kind: "ok",
+        text: "Password updated. Other devices have been signed out.",
+      });
+      setCurr("");
+      setNext("");
+      setConfirm("");
+      qc.invalidateQueries({ queryKey: ["me-sessions"] });
+    },
+    onError: (e: Error) => setPwMsg({ kind: "err", text: e.message }),
+  });
+
+  const revokeOneMut = useMutation({
+    mutationFn: (tokenHash: string) =>
+      api.del<{ ok: true }>(
+        `/me/sessions/${encodeURIComponent(tokenHash)}`,
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["me-sessions"] }),
+  });
+  const revokeAllMut = useMutation({
+    mutationFn: () =>
+      api.post<{ ok: true; revoked: number }>(
+        "/me/sessions/revoke-others",
+        {},
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["me-sessions"] }),
+  });
+
+  function submitChangePw(e: React.FormEvent) {
+    e.preventDefault();
+    setPwMsg(null);
+    if (next.length < 8) {
+      setPwMsg({
+        kind: "err",
+        text: "New password must be at least 8 characters.",
+      });
+      return;
+    }
+    if (next !== confirm) {
+      setPwMsg({ kind: "err", text: "New password and confirmation differ." });
+      return;
+    }
+    changePwMut.mutate({ currentPassword: curr, newPassword: next });
+  }
+
+  const sessions = sessionsQuery.data?.items ?? [];
+  const history = historyQuery.data?.items ?? [];
+  const otherCount = sessions.filter((s) => !s.current).length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* --- Change password ---------------------------------------- */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">Change password</div>
+          <div className="card-subtitle">
+            Updating your password signs out every other device automatically.
+          </div>
+        </div>
+        <div className="card-body">
+          <form
+            onSubmit={submitChangePw}
+            style={{ display: "flex", flexDirection: "column", gap: 12 }}
+          >
+            <div className="form-group">
+              <label className="form-label">Current password</label>
+              <input
+                className="form-control"
+                type="password"
+                autoComplete="current-password"
+                value={curr}
+                onChange={(e) => setCurr(e.target.value)}
+                required
+              />
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+              }}
+            >
+              <div className="form-group">
+                <label className="form-label">New password</label>
+                <input
+                  className="form-control"
+                  type="password"
+                  autoComplete="new-password"
+                  value={next}
+                  onChange={(e) => setNext(e.target.value)}
+                  minLength={8}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Confirm new password</label>
+                <input
+                  className="form-control"
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+            {pwMsg && (
+              <div
+                style={{
+                  fontSize: 12.5,
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  background:
+                    pwMsg.kind === "ok"
+                      ? "var(--success-bg)"
+                      : "var(--danger-bg)",
+                  color:
+                    pwMsg.kind === "ok"
+                      ? "var(--success-fg)"
+                      : "var(--danger-fg)",
+                }}
+              >
+                {pwMsg.text}
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={changePwMut.isPending}
+              >
+                {changePwMut.isPending ? "Updating…" : "Update password"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* --- Active sessions ---------------------------------------- */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">Active sessions</div>
+          <div className="card-subtitle">
+            Devices currently signed in to your account. Revoke any that you
+            don't recognise.
+          </div>
+        </div>
+        <div className="card-body" style={{ padding: 0 }}>
+          {sessionsQuery.isLoading ? (
+            <div style={{ padding: 14 }}>
+              <Loading />
+            </div>
+          ) : sessions.length === 0 ? (
+            <div
+              style={{
+                padding: 20,
+                fontSize: 13,
+                color: "var(--text-3)",
+                textAlign: "center",
+              }}
+            >
+              No active sessions.
+            </div>
+          ) : (
+            <>
+              {sessions.map((s) => (
+                <div
+                  key={s.tokenHash}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "12px 16px",
+                    borderTop: "1px solid var(--border)",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 50,
+                      background: s.current
+                        ? "var(--success-fg)"
+                        : "var(--text-4)",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontWeight: 600,
+                        fontSize: 13,
+                      }}
+                    >
+                      {uaLabel(s.userAgent)}
+                      {s.current && (
+                        <span
+                          style={{
+                            background: "var(--success-bg)",
+                            color: "var(--success-fg)",
+                            padding: "1px 7px",
+                            borderRadius: 999,
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                          }}
+                        >
+                          THIS DEVICE
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11.5,
+                        color: "var(--text-3)",
+                        marginTop: 2,
+                      }}
+                    >
+                      {(() => {
+                        const where = geoLabel(s.country, s.city);
+                        return where ? <span>{where} · </span> : null;
+                      })()}
+                      {s.ip ? <span>IP {s.ip} · </span> : null}
+                      Last seen {relativeTime(s.lastSeenAt)} · Expires{" "}
+                      {new Date(s.expiresAt).toLocaleDateString()}
+                    </div>
+                  </div>
+                  {!s.current && (
+                    <button
+                      className="btn btn-secondary btn-xs"
+                      disabled={revokeOneMut.isPending}
+                      onClick={() => revokeOneMut.mutate(s.tokenHash)}
+                    >
+                      Revoke
+                    </button>
+                  )}
+                </div>
+              ))}
+              {otherCount > 0 && (
+                <div
+                  style={{
+                    padding: "10px 16px",
+                    borderTop: "1px solid var(--border)",
+                    display: "flex",
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    disabled={revokeAllMut.isPending}
+                    onClick={() => revokeAllMut.mutate()}
+                  >
+                    {revokeAllMut.isPending
+                      ? "Signing out…"
+                      : `Sign out ${otherCount} other device${
+                          otherCount === 1 ? "" : "s"
+                        }`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* --- Recent sign-ins ---------------------------------------- */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">Recent sign-ins</div>
+          <div className="card-subtitle">
+            Last 20 successful logins on your account. Anything unfamiliar
+            means you should change your password.
+          </div>
+        </div>
+        <div className="card-body" style={{ padding: 0 }}>
+          {historyQuery.isLoading ? (
+            <div style={{ padding: 14 }}>
+              <Loading />
+            </div>
+          ) : history.length === 0 ? (
+            <div
+              style={{
+                padding: 20,
+                fontSize: 13,
+                color: "var(--text-3)",
+                textAlign: "center",
+              }}
+            >
+              No sign-in history yet.
+            </div>
+          ) : (
+            history.map((h) => (
+              <div
+                key={h.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 16px",
+                  borderTop: "1px solid var(--border)",
+                  fontSize: 12.5,
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500 }}>
+                    {uaLabel(h.meta?.userAgent)}
+                  </div>
+                  <div
+                    style={{
+                      color: "var(--text-3)",
+                      fontSize: 11.5,
+                      marginTop: 1,
+                    }}
+                  >
+                    {h.meta?.ip ? `IP ${h.meta.ip}` : "Unknown IP"}
+                  </div>
+                </div>
+                <div style={{ color: "var(--text-3)" }}>
+                  {relativeTime(h.createdAt)}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }

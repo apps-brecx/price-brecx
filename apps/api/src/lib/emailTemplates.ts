@@ -424,3 +424,106 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+/**
+ * Sign-in OTP email. Renders the 6-digit code in a big monospaced box that
+ * Gmail / Outlook auto-detect for their native "Copy code" floating action,
+ * so the user never needs to type it. The code itself is also wrapped in
+ *   <span data-otp-code> … </span>
+ * which several mail clients (Apple Mail, newer Outlook) treat as a copy
+ * affordance. We expose the same code in the X-Entity-Ref-ID and a plain
+ * "Your code: NNNNNN" subject prefix so password managers (1Password,
+ * Bitwarden) and iOS Mail's QuickType keyboard surface it automatically.
+ */
+export function otpEmailHtml(opts: {
+  code: string;
+  expiresInMinutes: number;
+  ip?: string | null;
+  userAgent?: string | null;
+}): string {
+  const { code, expiresInMinutes, ip, userAgent } = opts;
+  const meta = [ip, userAgent].filter(Boolean).join(" · ");
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">
+      Your Priceobo sign-in code is ${escapeHtml(code)}. It expires in ${expiresInMinutes} minutes.
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e6e8eb;">
+            <tr>
+              <td style="background:#4f46e5;padding:24px 32px;">
+                <span style="color:#ffffff;font-size:18px;font-weight:700;">Priceobo</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px;">
+                <h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Your sign-in code</h1>
+                <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151;">
+                  Use the verification code below to finish signing in. It is valid for
+                  <strong>${expiresInMinutes} minutes</strong>.
+                </p>
+
+                <!-- OTP block — large, monospaced, selectable. Modern Gmail
+                     auto-detects this pattern and renders a "Copy ${escapeHtml(code)}"
+                     button next to it. -->
+                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px;">
+                  <tr>
+                    <td align="center" style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:10px;padding:18px 0;">
+                      <div data-otp-code style="font-family:'SF Mono',Menlo,Consolas,monospace;font-size:34px;font-weight:700;letter-spacing:10px;color:#111827;user-select:all;-webkit-user-select:all;">
+                        ${escapeHtml(code)}
+                      </div>
+                      <div style="margin-top:6px;font-size:11px;color:#6b7280;">
+                        Triple-click or long-press to copy
+                      </div>
+                    </td>
+                  </tr>
+                </table>
+
+                ${
+                  meta
+                    ? `<p style="margin:0 0 8px;font-size:12px;color:#6b7280;">
+                         Requested from <strong>${escapeHtml(meta)}</strong>.
+                       </p>`
+                    : ""
+                }
+                <p style="margin:0;font-size:12px;line-height:1.6;color:#9ca3af;">
+                  If you didn't try to sign in, you can safely ignore this email — without the
+                  code, no-one can access your account. Consider changing your password from
+                  Settings → Security if you're concerned.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 32px;background:#f9fafb;border-top:1px solid #e6e8eb;">
+                <p style="margin:0;font-size:11px;color:#9ca3af;">
+                  Priceobo will never ask you to share this code with anyone.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+/** Plain-text counterpart of {@link otpEmailHtml}. */
+export function otpEmailText(opts: {
+  code: string;
+  expiresInMinutes: number;
+}): string {
+  const { code, expiresInMinutes } = opts;
+  return [
+    `Your Priceobo sign-in code is: ${code}`,
+    "",
+    `It expires in ${expiresInMinutes} minutes.`,
+    "",
+    "If you didn't try to sign in, you can safely ignore this email.",
+    "",
+    "— Priceobo",
+  ].join("\n");
+}

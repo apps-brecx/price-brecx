@@ -62,3 +62,33 @@
   .auth-shell { padding: 16px; }
   .auth-card { padding: 24px 20px; }
 }
+
+/* OTP / step-2 sign-in additions */
+.auth-info {
+  background: var(--success-bg);
+  color: var(--success-fg);
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-size: 12.5px;
+}
+.auth-otp-input {
+  font-family: var(--font-mono, ui-monospace, 'SF Mono', Menlo, Consolas, monospace);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 10px;
+  text-align: center;
+  height: 52px;
+  padding: 0 12px;
+}
+.auth-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--brand-600);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.auth-link:hover { color: var(--brand-700); text-decoration: underline; }
+.auth-link:disabled { opacity: 0.5; cursor: not-allowed; }

@@ -14,6 +14,12 @@ export const idSchema = z.string().uuid();
 
 /* ----------------------------- Auth ----------------------------- */
 
+export const otpVerifySchema = z.object({
+  email: z.string().email().trim().toLowerCase(),
+  code: z.string().regex(/^\d{6}$/, "Code must be exactly 6 digits"),
+});
+export type OtpVerifyInput = z.infer<typeof otpVerifySchema>;
+
 export const signInSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(200),
