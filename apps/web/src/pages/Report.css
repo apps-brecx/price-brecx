@@ -136,6 +136,14 @@
   padding: 1px 6px;
   border-radius: 4px;
 }
+.sr-id-copy {
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.sr-id-copy:hover {
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
 
 .sr-rail-card { padding: 16px; }
 .sr-rail-head {

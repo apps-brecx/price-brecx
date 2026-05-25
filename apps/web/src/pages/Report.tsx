@@ -346,6 +346,11 @@ export function Report() {
       toast.error("Couldn't update favorite", "Please try again."),
   });
 
+  function copy(text: string, label: string) {
+    void navigator.clipboard?.writeText(text);
+    toast.success("Copied", `${label} copied to clipboard.`);
+  }
+
   const syncMut = useMutation({
     mutationFn: () =>
       api.post<{ ok: boolean; firstTime: boolean }>("/sale-report/sync"),
@@ -480,6 +485,38 @@ export function Report() {
         </button>
       </div>
 
+      {/* Status line — sits above the toolbar so it appears vertically above
+          the sticky chart card on the right rail (same pattern as the
+          SKUs/Inventory pages, with the isFetching spinner inline). */}
+      {!tableQ.isLoading && !tableQ.isError && tableQ.data && (
+        <div
+          style={{
+            fontSize: 13,
+            color: "var(--text-2)",
+            marginBottom: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span>
+            Showing{" "}
+            <strong style={{ color: "var(--text)" }}>
+              {num((page - 1) * pageSize + 1)}-
+              {num(Math.min(page * pageSize, tableQ.data.total))}
+            </strong>{" "}
+            of{" "}
+            <strong style={{ color: "var(--text)" }}>
+              {num(tableQ.data.total)}
+            </strong>{" "}
+            {tableQ.data.total === 1 ? "product" : "products"}
+          </span>
+          {tableQ.isFetching && (
+            <span className="spinner-inline" aria-label="Loading" />
+          )}
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="sr-toolbar">
         <div className="input-wrap" style={{ minWidth: 240 }}>
@@ -595,37 +632,6 @@ export function Report() {
             )
           ) : (
             <>
-              {/* Status line above the table — count + a spinner that shows
-                  during page/filter changes (same pattern as SKUs/Inventory). */}
-              <div
-                style={{
-                  fontSize: 13,
-                  color: "var(--text-2)",
-                  marginBottom: 10,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                <span>
-                  Showing{" "}
-                  <strong style={{ color: "var(--text)" }}>
-                    {num((page - 1) * pageSize + 1)}-
-                    {num(Math.min(page * pageSize, data.total))}
-                  </strong>{" "}
-                  of{" "}
-                  <strong style={{ color: "var(--text)" }}>
-                    {num(data.total)}
-                  </strong>{" "}
-                  {data.total === 1 ? "product" : "products"}
-                </span>
-                {tableQ.isFetching && !tableQ.isLoading && (
-                  <span
-                    className="spinner-inline"
-                    aria-label="Loading"
-                  />
-                )}
-              </div>
               <div
                 className={
                   "sr-table-wrap card" +
@@ -706,9 +712,27 @@ export function Report() {
                               </span>
                               <span className="sr-ids">
                                 {r.asin && (
-                                  <span className="sr-id">{r.asin}</span>
+                                  <span
+                                    className="sr-id sr-id-copy"
+                                    title="Click to copy ASIN"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      copy(r.asin!, "ASIN");
+                                    }}
+                                  >
+                                    {r.asin}
+                                  </span>
                                 )}
-                                <span className="sr-id">{r.sku}</span>
+                                <span
+                                  className="sr-id sr-id-copy"
+                                  title="Click to copy SKU"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    copy(r.sku, "SKU");
+                                  }}
+                                >
+                                  {r.sku}
+                                </span>
                               </span>
                             </div>
                           </td>
