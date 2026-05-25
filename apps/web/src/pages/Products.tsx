@@ -1,5 +1,6 @@
 import "./Products.css";
-import { useMemo, useState } from "react";
+import "./Inventory.css";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CHANNEL_LABELS, SALES_CHANNELS } from "@fbm/shared";
 import { api } from "../lib/api";
@@ -63,6 +64,8 @@ export function Products() {
   const [createOpen, setCreateOpen] = useState(false);
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [scheduleFor, setScheduleFor] = useState<{
     id: string;
     sku: string;
@@ -171,6 +174,31 @@ export function Products() {
         p.primarySku.toLowerCase().includes(q),
     );
   }, [items, search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paged = useMemo(
+    () => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [filtered, currentPage, pageSize],
+  );
+  const fromN = filtered.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const toN = Math.min(currentPage * pageSize, filtered.length);
+
+  function pageWindow(current: number, totalP: number): (number | "…")[] {
+    if (totalP <= 7) return Array.from({ length: totalP }, (_, i) => i + 1);
+    const out: (number | "…")[] = [1];
+    const lo = Math.max(2, current - 2);
+    const hi = Math.min(totalP - 1, current + 2);
+    if (lo > 2) out.push("…");
+    for (let i = lo; i <= hi; i++) out.push(i);
+    if (hi < totalP - 1) out.push("…");
+    out.push(totalP);
+    return out;
+  }
 
   function exportCsv() {
     if (filtered.length === 0) return;
@@ -385,11 +413,27 @@ export function Products() {
             </div>
             <div style={{ flex: 1 }} />
             <div style={{ fontSize: 12.5, color: "var(--text-3)" }}>
+              {filtered.length > 0 && (
+                <>
+                  Showing{" "}
+                  <strong style={{ color: "var(--text)" }}>
+                    {num(fromN)}-{num(toN)}
+                  </strong>{" "}
+                  of{" "}
+                </>
+              )}
               <strong style={{ color: "var(--text)" }}>{num(filtered.length)}</strong>
               {filtered.length !== items.length && (
                 <> of {num(items.length)}</>
               )}{" "}
               {filtered.length === 1 ? "product" : "products"}
+              {query.isFetching && !query.isLoading && (
+                <span
+                  className="spinner-inline"
+                  style={{ marginLeft: 8 }}
+                  aria-label="Loading"
+                />
+              )}
             </div>
           </div>
 
@@ -422,7 +466,13 @@ export function Products() {
               message="Try a different search term."
             />
           ) : (
-            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            <div
+              className={
+                "card" +
+                (query.isFetching && !query.isLoading ? " is-refetching" : "")
+              }
+              style={{ padding: 0, overflow: "hidden" }}
+            >
               <table className="products-table">
                 <thead>
                   <tr>
@@ -440,7 +490,7 @@ export function Products() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((p) => (
+                  {paged.map((p) => (
                     <tr key={p.id}>
                       <td>
                         <div className="prod-name">{p.name}</div>
@@ -532,6 +582,53 @@ export function Products() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {filtered.length > 0 && totalPages > 1 && (
+            <div className="inv-pagination">
+              <button
+                className="inv-page-arrow"
+                title="Previous page"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </button>
+              {pageWindow(currentPage, totalPages).map((p, i) =>
+                p === "…" ? (
+                  <span key={`e${i}`} className="inv-page-ellipsis">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    className={"inv-page-btn" + (p === currentPage ? " active" : "")}
+                    onClick={() => setPage(p)}
+                  >
+                    {p}
+                  </button>
+                ),
+              )}
+              <button
+                className="inv-page-arrow"
+                title="Next page"
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+              <select
+                className="inv-pagesize"
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+              >
+                {[25, 50, 100, 200].map((n) => (
+                  <option key={n} value={n}>{n} / page</option>
+                ))}
+              </select>
             </div>
           )}
         </>

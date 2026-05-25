@@ -11,6 +11,7 @@ import { relativeTime } from "../lib/format";
 import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
 import { useToast } from "../components/Toast";
 import "./LostBuyBox.css";
+import "./Inventory.css";
 
 interface ScanProgress {
   phase: "report" | "pricing" | "retry" | "analyze";
@@ -157,6 +158,8 @@ export function LostBuyBox() {
   const [search, setSearch] = useState("");
   const [reasonFilter, setReasonFilter] = useState<string>("all");
   const [specialOnly, setSpecialOnly] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectedIgnored, setSelectedIgnored] = useState<Set<string>>(
     new Set(),
@@ -374,6 +377,40 @@ export function LostBuyBox() {
         (r.productName ?? "").toLowerCase().includes(q),
     );
   }, [ignoredItems, search]);
+
+  // Reset to page 1 when the visible set shifts under us. Bulk-selection
+  // still operates on the entire filtered list, not just the current page.
+  useEffect(() => {
+    setPage(1);
+  }, [tab, search, reasonFilter, specialOnly, pageSize]);
+
+  const activeList = tab === "losses" ? filteredRows : filteredIgnored;
+  const totalPages = Math.max(1, Math.ceil(activeList.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageEnd = currentPage * pageSize;
+  const pagedRows = useMemo(
+    () => filteredRows.slice(pageStart, pageEnd),
+    [filteredRows, pageStart, pageEnd],
+  );
+  const pagedIgnored = useMemo(
+    () => filteredIgnored.slice(pageStart, pageEnd),
+    [filteredIgnored, pageStart, pageEnd],
+  );
+  const fromN = activeList.length === 0 ? 0 : pageStart + 1;
+  const toN = Math.min(pageEnd, activeList.length);
+
+  function pageWindow(current: number, totalP: number): (number | "…")[] {
+    if (totalP <= 7) return Array.from({ length: totalP }, (_, i) => i + 1);
+    const out: (number | "…")[] = [1];
+    const lo = Math.max(2, current - 2);
+    const hi = Math.min(totalP - 1, current + 2);
+    if (lo > 2) out.push("…");
+    for (let i = lo; i <= hi; i++) out.push(i);
+    if (hi < totalP - 1) out.push("…");
+    out.push(totalP);
+    return out;
+  }
 
   // Drop selections for ASINs no longer in the report (e.g. after a re-scan
   // or after they were ignored elsewhere).
@@ -687,6 +724,13 @@ export function LostBuyBox() {
               {filteredRows.length}
             </strong>{" "}
             ASIN{filteredRows.length === 1 ? "" : "s"} missed Buy Box
+            {run.isFetching && !run.isLoading && (
+              <span
+                className="spinner-inline"
+                style={{ marginLeft: 8 }}
+                aria-label="Loading"
+              />
+            )}
             {selectedRows.length > 0 && (
               <>
                 {" · "}
@@ -737,6 +781,13 @@ export function LostBuyBox() {
               {filteredIgnored.length}
             </strong>{" "}
             ignored ASIN{filteredIgnored.length === 1 ? "" : "s"}
+            {ignored.isFetching && !ignored.isLoading && (
+              <span
+                className="spinner-inline"
+                style={{ marginLeft: 8 }}
+                aria-label="Loading"
+              />
+            )}
             {selectedIgnoredRows.length > 0 && (
               <>
                 {" · "}
@@ -791,7 +842,14 @@ export function LostBuyBox() {
             }
           />
         ) : (
-          <div className="card card-table-wrap" style={{ padding: 0 }}>
+          <>
+          <div
+            className={
+              "card card-table-wrap" +
+              (run.isFetching && !run.isLoading ? " is-refetching" : "")
+            }
+            style={{ padding: 0 }}
+          >
             <table className="tbl tbl-compact">
               <thead>
                 <tr>
@@ -814,7 +872,7 @@ export function LostBuyBox() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((r) => {
+                {pagedRows.map((r) => {
                   const isSel = selected.has(r.asin);
                   return (
                   <tr
@@ -887,6 +945,56 @@ export function LostBuyBox() {
               </tbody>
             </table>
           </div>
+          {totalPages > 1 && (
+            <div className="inv-pagination">
+              <button
+                className="inv-page-arrow"
+                title="Previous page"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </button>
+              {pageWindow(currentPage, totalPages).map((p, i) =>
+                p === "…" ? (
+                  <span key={`e${i}`} className="inv-page-ellipsis">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    className={"inv-page-btn" + (p === currentPage ? " active" : "")}
+                    onClick={() => setPage(p)}
+                  >
+                    {p}
+                  </button>
+                ),
+              )}
+              <button
+                className="inv-page-arrow"
+                title="Next page"
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+              <select
+                className="inv-pagesize"
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+              >
+                {[25, 50, 100, 200].map((n) => (
+                  <option key={n} value={n}>{n} / page</option>
+                ))}
+              </select>
+              <span style={{ marginLeft: 8, fontSize: 12, color: "var(--text-3)" }}>
+                {fromN}-{toN} of {activeList.length}
+              </span>
+            </div>
+          )}
+          </>
         ))}
 
       {/* Ignored */}
@@ -901,7 +1009,14 @@ export function LostBuyBox() {
             message="ASINs you ignore from the Losses tab are excluded from scans and never trigger an email."
           />
         ) : (
-          <div className="card card-table-wrap" style={{ padding: 0 }}>
+          <>
+          <div
+            className={
+              "card card-table-wrap" +
+              (ignored.isFetching && !ignored.isLoading ? " is-refetching" : "")
+            }
+            style={{ padding: 0 }}
+          >
             <table className="tbl tbl-compact">
               <thead>
                 <tr>
@@ -923,7 +1038,7 @@ export function LostBuyBox() {
                 </tr>
               </thead>
               <tbody>
-                {filteredIgnored.map((r) => {
+                {pagedIgnored.map((r) => {
                   const isSel = selectedIgnored.has(r.asin);
                   return (
                   <tr
@@ -989,6 +1104,56 @@ export function LostBuyBox() {
               </tbody>
             </table>
           </div>
+          {totalPages > 1 && (
+            <div className="inv-pagination">
+              <button
+                className="inv-page-arrow"
+                title="Previous page"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </button>
+              {pageWindow(currentPage, totalPages).map((p, i) =>
+                p === "…" ? (
+                  <span key={`e${i}`} className="inv-page-ellipsis">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    className={"inv-page-btn" + (p === currentPage ? " active" : "")}
+                    onClick={() => setPage(p)}
+                  >
+                    {p}
+                  </button>
+                ),
+              )}
+              <button
+                className="inv-page-arrow"
+                title="Next page"
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+              <select
+                className="inv-pagesize"
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+              >
+                {[25, 50, 100, 200].map((n) => (
+                  <option key={n} value={n}>{n} / page</option>
+                ))}
+              </select>
+              <span style={{ marginLeft: 8, fontSize: 12, color: "var(--text-3)" }}>
+                {fromN}-{toN} of {activeList.length}
+              </span>
+            </div>
+          )}
+          </>
         ))}
     </div>
   );

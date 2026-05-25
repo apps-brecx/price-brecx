@@ -6,6 +6,10 @@
 .page-header { display:flex; align-items:flex-start; gap:12px; margin-bottom:20px; }
 .page-actions { margin-left:auto; display:flex; gap:8px; align-items:center; }
 .spinner { width:22px; height:22px; border:2.5px solid var(--surface-3); border-top-color:var(--brand-600); border-radius:50%; animation:spin .7s linear infinite; }
+/* Inline 13px spinner for next-to-text use (e.g. result counts during a refetch). */
+.spinner-inline { display:inline-block; width:13px; height:13px; border:2px solid var(--surface-3); border-top-color:var(--brand-600); border-radius:50%; animation:spin .7s linear infinite; vertical-align:-2px; }
+/* Subtle fade applied to result lists while react-query refetches in the background. */
+.is-refetching { opacity:.55; transition:opacity .15s ease; pointer-events:none; }
 @keyframes spin { to { transform:rotate(360deg); } }
 .center-fill { display:flex; align-items:center; justify-content:center; min-height:60vh; }
 .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }

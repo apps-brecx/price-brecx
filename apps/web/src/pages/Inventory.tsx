@@ -470,8 +470,22 @@ export function Inventory() {
                 </strong>{" "}
                 of <strong style={{ color: "var(--text)" }}>{num(total)}</strong>{" "}
                 SKU{total === 1 ? "" : "s"}
+                {query.isFetching && !query.isLoading && (
+                  <span
+                    className="spinner-inline"
+                    style={{ marginLeft: 8 }}
+                    aria-label="Loading"
+                  />
+                )}
               </div>
-              <div className="inv-product-list">
+              <div
+                className={
+                  "inv-product-list" +
+                  (query.isFetching && !query.isLoading
+                    ? " is-refetching"
+                    : "")
+                }
+              >
                 {filtered.map((r) => {
                   const isOpen = open.has(r.skuId);
                   const level = stockLevel(r.stock);

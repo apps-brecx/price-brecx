@@ -847,7 +847,13 @@ export function SKUs() {
         />
       ) : (
         <>
-          <div className="card card-table-wrap" style={{ padding: 0 }}>
+          <div
+            className={
+              "card card-table-wrap" +
+              (query.isFetching && !query.isLoading ? " is-refetching" : "")
+            }
+            style={{ padding: 0 }}
+          >
             <table className="tbl tbl-sticky">
               <thead>
                 <tr>
@@ -1122,6 +1128,13 @@ export function SKUs() {
                 <>
                   {num(fromN)}-{num(toN)} of {num(total)}
                 </>
+              )}
+              {query.isFetching && !query.isLoading && (
+                <span
+                  className="spinner-inline"
+                  style={{ marginLeft: 8 }}
+                  aria-label="Loading"
+                />
               )}
             </span>
             <button
