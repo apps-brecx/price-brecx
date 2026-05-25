@@ -29,7 +29,7 @@ import {
 } from "./lib/emailTemplates.js";
 import { evaluateSalesAlerts } from "./amazon/salesAlertEval.js";
 import { broadcast } from "./ws.js";
-import type { LostBuyboxRow } from "@fbm/shared";
+import { rowMatchesBuyboxFilter, type LostBuyboxRow } from "@fbm/shared";
 
 /** Local calendar date + HH:MM for a timezone, no external date lib. */
 function localParts(tz: string): { date: string; hm: string } {
@@ -390,10 +390,10 @@ export async function startJobs(): Promise<void> {
           // Emails:
           //   * Manual scan (actor with "@") → always email the actor with
           //     the full current loss list, like before.
-          //   * Cron scan (actor="system") → email the workspace's configured
-          //     buybox_alert_settings.emails recipients, but ONLY for
-          //     newly-lost ASINs. Avoids re-spamming on every 2-hr tick when
-          //     the same items have been lost for days.
+          //   * Cron scan (actor="system") → notify each enabled buybox_alerts
+          //     row's recipients with the newly-lost ASINs matching its filter,
+          //     but ONLY the newly-lost ones. Avoids re-spamming on every 2-hr
+          //     tick when the same items have been lost for days.
           if (actor.includes("@") && result.rows.length > 0) {
             await sendMail({
               to: actor,
@@ -414,32 +414,44 @@ export async function startJobs(): Promise<void> {
               logger.error({ err }, "Buy Box loss email failed"),
             );
           } else if (!actor.includes("@") && newlyLost.length > 0) {
-            // Cron-triggered: alert the configured recipients about the new
-            // losses only. Pulls from the same `buybox_alert_settings` row
-            // the digest already uses, so admins manage it in one place.
-            const [conf] = await sql<
-              { emails: string[]; enabled: boolean }[]
+            // Cron-triggered: alert each enabled alert's recipients about the
+            // new losses that match that alert's filter. Different filters can
+            // therefore notify different emails.
+            const alerts = await sql<
+              {
+                id: string;
+                emails: string[];
+                reasons: string[];
+                specialOnly: boolean;
+              }[]
             >`
-              select emails, enabled from buybox_alert_settings
-               where workspace_id = ${workspaceId}
+              select id, emails, reasons, special_only as "specialOnly"
+                from buybox_alerts
+               where workspace_id = ${workspaceId} and enabled = true
             `;
-            const recipients =
-              conf?.enabled && Array.isArray(conf?.emails)
-                ? conf.emails.filter((e) => e && e.includes("@"))
+            for (const alert of alerts) {
+              const matched = newlyLost.filter((r) =>
+                rowMatchesBuyboxFilter(r, {
+                  reasons: alert.reasons ?? [],
+                  specialOnly: alert.specialOnly,
+                }),
+              );
+              const recipients = Array.isArray(alert.emails)
+                ? alert.emails.filter((e) => e && e.includes("@"))
                 : [];
-            if (recipients.length > 0) {
+              if (matched.length === 0 || recipients.length === 0) continue;
               await sendMail({
                 to: recipients,
-                subject: `[Buy Box] ${newlyLost.length} new ASIN${
-                  newlyLost.length === 1 ? "" : "s"
+                subject: `[Buy Box] ${matched.length} new ASIN${
+                  matched.length === 1 ? "" : "s"
                 } just lost the Buy Box`,
                 html: buyBoxLossEmailHtml({
-                  rows: newlyLost,
+                  rows: matched,
                   marketplaceId,
                   reportUrl: `${appUrl}/buybox`,
                 }),
                 text: buyBoxLossEmailText({
-                  rows: newlyLost,
+                  rows: matched,
                   marketplaceId,
                   reportUrl: `${appUrl}/buybox`,
                 }),
@@ -449,7 +461,8 @@ export async function startJobs(): Promise<void> {
               logger.info(
                 {
                   workspaceId,
-                  newlyLost: newlyLost.length,
+                  alertId: alert.id,
+                  newlyLost: matched.length,
                   recipients: recipients.length,
                 },
                 "Buy Box newly-lost alert sent",
@@ -581,35 +594,43 @@ export async function startJobs(): Promise<void> {
   // hammered by two heavy jobs simultaneously.
   await boss.schedule(LOST_BUYBOX_CRON_QUEUE, "30 */2 * * *");
 
-  // ---- Buy Box loss digest: emailed at each workspace's chosen time ----
+  // ---- Buy Box loss digest: emailed at each alert's chosen time ----
   await boss.createQueue(BUYBOX_ALERT_DIGEST_QUEUE);
   await boss.work(BUYBOX_ALERT_DIGEST_QUEUE, async () => {
-    const settings = await sql<
+    const alerts = await sql<
       {
-        workspaceId: string;
+        id: string;
         sendTime: string;
         timezone: string;
         emails: string[];
+        reasons: string[];
+        specialOnly: boolean;
         lastSentOn: string | null;
         rows: LostBuyboxRow[] | null;
         marketplaceId: string | null;
         updatedAt: Date | null;
       }[]
     >`
-      select s.workspace_id as "workspaceId", s.send_time as "sendTime",
-             s.timezone, s.emails, s.last_sent_on as "lastSentOn",
+      select a.id, a.send_time as "sendTime", a.timezone, a.emails,
+             a.reasons, a.special_only as "specialOnly",
+             a.last_sent_on as "lastSentOn",
              r.rows, r.marketplace_id as "marketplaceId",
              r.updated_at as "updatedAt"
-        from buybox_alert_settings s
-        left join lost_buybox_runs r on r.workspace_id = s.workspace_id
-       where s.enabled = true
+        from buybox_alerts a
+        left join lost_buybox_runs r on r.workspace_id = a.workspace_id
+       where a.enabled = true
     `;
-    for (const s of settings) {
-      const { date, hm } = localParts(s.timezone);
-      if (s.lastSentOn === date) continue; // already handled today
-      if (hm < s.sendTime) continue; // not yet the chosen time
-      const rows = s.rows ?? [];
-      const emails = s.emails ?? [];
+    for (const a of alerts) {
+      const { date, hm } = localParts(a.timezone);
+      if (a.lastSentOn === date) continue; // already handled today
+      if (hm < a.sendTime) continue; // not yet the chosen time
+      const rows = (a.rows ?? []).filter((r) =>
+        rowMatchesBuyboxFilter(r, {
+          reasons: a.reasons ?? [],
+          specialOnly: a.specialOnly,
+        }),
+      );
+      const emails = a.emails ?? [];
       if (rows.length > 0 && emails.length > 0) {
         await sendMail({
           to: emails,
@@ -618,25 +639,25 @@ export async function startJobs(): Promise<void> {
           } lost the Buy Box`,
           html: buyBoxLossEmailHtml({
             rows,
-            marketplaceId: s.marketplaceId ?? null,
+            marketplaceId: a.marketplaceId ?? null,
             reportUrl: `${appUrl}/buybox`,
-            scannedAt: s.updatedAt ? s.updatedAt.toISOString() : null,
+            scannedAt: a.updatedAt ? a.updatedAt.toISOString() : null,
           }),
           text: buyBoxLossEmailText({
             rows,
-            marketplaceId: s.marketplaceId ?? null,
+            marketplaceId: a.marketplaceId ?? null,
             reportUrl: `${appUrl}/buybox`,
           }),
         }).catch((err) =>
           logger.error({ err }, "Buy Box digest email failed"),
         );
       }
-      // Mark handled for today even when there were no losses, so we don't
-      // re-query every 15 min for the rest of the day.
+      // Mark handled for today even when there were no matching losses, so we
+      // don't re-query every 15 min for the rest of the day.
       await sql`
-        update buybox_alert_settings
+        update buybox_alerts
            set last_sent_on = ${date}, updated_at = now()
-         where workspace_id = ${s.workspaceId}
+         where id = ${a.id}
       `;
     }
   });

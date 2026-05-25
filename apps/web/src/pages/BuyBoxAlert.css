@@ -61,3 +61,30 @@
 .bba-toggle.on::after {
   transform: translateX(18px);
 }
+
+.bba-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.bba-card-head .bba-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bba-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 360px;
+  justify-content: flex-end;
+}
+.bba-filter-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 2px;
+}

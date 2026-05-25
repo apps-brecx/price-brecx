@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LostBuyboxRun, LostBuyboxRow, IgnoredAsin } from "@fbm/shared";
+import {
+  type LostBuyboxRun,
+  type LostBuyboxRow,
+  type IgnoredAsin,
+  matchesBuyboxSpecial,
+} from "@fbm/shared";
 import { api } from "../lib/api";
 import { relativeTime } from "../lib/format";
 import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
@@ -82,6 +87,10 @@ function csvCell(v: string | number | null): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+/** Quick filter shared with the Buy Box alert digest: no "FBM" in any SKU,
+ *  has a price, and "Syruvia"/"Bursting" in the title. */
+const matchesSpecial = matchesBuyboxSpecial;
+
 /** Product name (links to the Amazon listing) + click-to-copy ASIN & every
  *  seller SKU mapped to that ASIN. */
 function ProductCell({
@@ -147,6 +156,7 @@ export function LostBuyBox() {
   const [tab, setTab] = useState<Tab>("losses");
   const [search, setSearch] = useState("");
   const [reasonFilter, setReasonFilter] = useState<string>("all");
+  const [specialOnly, setSpecialOnly] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectedIgnored, setSelectedIgnored] = useState<Set<string>>(
     new Set(),
@@ -334,10 +344,16 @@ export function LostBuyBox() {
     return c;
   }, [rows]);
 
+  const specialCount = useMemo(
+    () => rows.filter(matchesSpecial).length,
+    [rows],
+  );
+
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       if (reasonFilter !== "all" && r.reason !== reasonFilter) return false;
+      if (specialOnly && !matchesSpecial(r)) return false;
       if (!q) return true;
       const skus = r.skus?.length ? r.skus : r.sellerSku ? [r.sellerSku] : [];
       return (
@@ -346,7 +362,7 @@ export function LostBuyBox() {
         (r.productName ?? "").toLowerCase().includes(q)
       );
     });
-  }, [rows, search, reasonFilter]);
+  }, [rows, search, reasonFilter, specialOnly]);
 
   const filteredIgnored = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -636,6 +652,22 @@ export function LostBuyBox() {
               <span className="count">{reasonCounts[key] ?? 0}</span>
             </div>
           ))}
+          <div
+            style={{
+              width: 1,
+              height: 20,
+              background: "var(--border)",
+              margin: "0 4px",
+            }}
+          />
+          <div
+            className={"filter-chip" + (specialOnly ? " active" : "")}
+            onClick={() => setSpecialOnly((v) => !v)}
+            title="Non-FBM SKUs that have a price and 'Syruvia' or 'Bursting' in the title"
+          >
+            Syruvia / Bursting{" "}
+            <span className="count">{specialCount}</span>
+          </div>
         </div>
       )}
 
