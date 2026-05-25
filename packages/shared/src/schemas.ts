@@ -386,25 +386,81 @@ const HHMM = z
   .string()
   .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Time must be HH:MM (24-hour)");
 
-/** Scheduled buy-box-loss email digest config (one per workspace). */
+/** Title keywords for the "Syruvia / Bursting" preset filter. */
+export const BUYBOX_SPECIAL_TITLE_KEYWORDS = ["syruvia", "bursting"] as const;
+
+/** The "Syruvia / Bursting" preset: no "FBM" in any SKU, has a price, and a
+ *  matching keyword in the title. Shared so the Lost Buy Box page filter and
+ *  the alert digest evaluate a row identically. */
+export function matchesBuyboxSpecial(r: LostBuyboxRow): boolean {
+  const skus = r.skus?.length ? r.skus : r.sellerSku ? [r.sellerSku] : [];
+  const noFbm = skus.every((s) => !s.toLowerCase().includes("fbm"));
+  const hasPrice = r.myPrice != null && r.myPrice > 0;
+  const title = (r.productName ?? "").toLowerCase();
+  const titleMatch = BUYBOX_SPECIAL_TITLE_KEYWORDS.some((kw) =>
+    title.includes(kw),
+  );
+  return noFbm && hasPrice && titleMatch;
+}
+
+/** A Buy Box alert's filter: which loss reasons count (empty = all reasons),
+ *  and whether to restrict to the Syruvia/Bursting preset. */
+export interface BuyboxAlertFilter {
+  reasons: string[];
+  specialOnly: boolean;
+}
+
+/** True when a lost-Buy-Box row should be included for the given filter. */
+export function rowMatchesBuyboxFilter(
+  r: LostBuyboxRow,
+  f: BuyboxAlertFilter,
+): boolean {
+  if (f.reasons.length > 0 && !f.reasons.includes(r.reason)) return false;
+  if (f.specialOnly && !matchesBuyboxSpecial(r)) return false;
+  return true;
+}
+
+/** One scheduled buy-box-loss email digest. A workspace can have many, each
+ *  with its own filter, schedule and recipients. */
 export const buyboxAlertSchema = z.object({
+  id: z.string(),
+  name: z.string(),
   enabled: z.boolean(),
   /** Local time of day to send the digest, "HH:MM" 24-hour. */
   sendTime: HHMM,
   timezone: z.string(),
   emails: z.array(z.string().email()),
+  /** Loss reasons that count toward this alert; empty = all reasons. */
+  reasons: z.array(z.enum(LOST_BUYBOX_REASONS)),
+  /** Restrict to the Syruvia/Bursting preset (non-FBM, priced, keyword title). */
+  specialOnly: z.boolean(),
   /** Local date (YYYY-MM-DD) the digest was last handled; null = never. */
   lastSentOn: z.string().nullable(),
+  createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
 });
 export type BuyboxAlert = z.infer<typeof buyboxAlertSchema>;
 
+export const buyboxAlertCreateSchema = z.object({
+  name: z.string().min(1).max(80).default("Buy Box alert"),
+  enabled: z.boolean().default(false),
+  sendTime: HHMM.default("09:00"),
+  timezone: z.string().min(1).max(64).default("America/New_York"),
+  emails: z.array(z.string().email()).max(20).default([]),
+  reasons: z.array(z.enum(LOST_BUYBOX_REASONS)).default([]),
+  specialOnly: z.boolean().default(false),
+});
+export type BuyboxAlertCreateInput = z.infer<typeof buyboxAlertCreateSchema>;
+
 export const buyboxAlertUpdateSchema = z
   .object({
+    name: z.string().min(1).max(80).optional(),
     enabled: z.boolean().optional(),
     sendTime: HHMM.optional(),
     timezone: z.string().min(1).max(64).optional(),
     emails: z.array(z.string().email()).max(20).optional(),
+    reasons: z.array(z.enum(LOST_BUYBOX_REASONS)).optional(),
+    specialOnly: z.boolean().optional(),
   })
   .refine((b) => Object.keys(b).length > 0, { message: "No fields to update" });
 export type BuyboxAlertUpdateInput = z.infer<typeof buyboxAlertUpdateSchema>;

@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LostBuyboxRun, LostBuyboxRow, IgnoredAsin } from "@fbm/shared";
+import {
+  type LostBuyboxRun,
+  type LostBuyboxRow,
+  type IgnoredAsin,
+  matchesBuyboxSpecial,
+} from "@fbm/shared";
 import { api } from "../lib/api";
 import { relativeTime } from "../lib/format";
 import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
@@ -82,19 +87,9 @@ function csvCell(v: string | number | null): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** Title keywords for the "Syruvia / Bursting" quick filter. */
-const SPECIAL_TITLE_KEYWORDS = ["syruvia", "bursting"];
-
-/** Quick filter: no "FBM" in any SKU, has a price, and "Syruvia" or
- *  "Bursting" in the product title. */
-function matchesSpecial(r: LostBuyboxRow): boolean {
-  const skus = r.skus?.length ? r.skus : r.sellerSku ? [r.sellerSku] : [];
-  const noFbm = skus.every((s) => !s.toLowerCase().includes("fbm"));
-  const hasPrice = r.myPrice != null && r.myPrice > 0;
-  const title = (r.productName ?? "").toLowerCase();
-  const titleMatch = SPECIAL_TITLE_KEYWORDS.some((kw) => title.includes(kw));
-  return noFbm && hasPrice && titleMatch;
-}
+/** Quick filter shared with the Buy Box alert digest: no "FBM" in any SKU,
+ *  has a price, and "Syruvia"/"Bursting" in the title. */
+const matchesSpecial = matchesBuyboxSpecial;
 
 /** Product name (links to the Amazon listing) + click-to-copy ASIN & every
  *  seller SKU mapped to that ASIN. */
