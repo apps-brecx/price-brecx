@@ -11,6 +11,7 @@ import {
   syncSales,
   type StageResult,
 } from "./amazon/sync.js";
+import { aggregateOrdersByDay } from "./amazon/salesAggregator.js";
 import { runLostBuyboxScan } from "./amazon/buyboxScan.js";
 import { syncNineyardToSkus, nineyardReady } from "./nineyard/index.js";
 import {
@@ -74,6 +75,8 @@ export const BUYBOX_ALERT_DIGEST_QUEUE = "buybox-alert-digest";
 /** Every 15 min: evaluates sales-alert triggers + sends digest at chosen time. */
 export const SALES_ALERT_DIGEST_QUEUE = "sales-alert-digest";
 export const PRICE_ALERT_DIGEST_QUEUE = "price-alert-digest";
+export const SALES_BACKFILL_QUEUE = "sales-backfill";
+export const SALES_DEEP_BACKFILL_QUEUE = "sales-deep-backfill";
 
 /* ----- Legacy-style 4-stage daily SKUs sync (Asia/Dhaka timings) ----- */
 export const LISTINGS_SYNC_QUEUE = "listings-sync";          // per-workspace stage worker
@@ -946,6 +949,196 @@ export async function startJobs(): Promise<void> {
     }
   });
   await boss.schedule(PRICE_ALERT_DIGEST_QUEUE, "*/15 * * * *");
+
+  // ---- Sales backfill: one-shot chunked sync covering ~90 days ----
+  // BY_LAST_UPDATE_GENERAL silently returns empty past ~60 days, so we split
+  // the request into three 30-day windows and aggregate each into
+  // daily_sales. Each chunk is a full SP-API report (queue → poll → download),
+  // so the worker can take 10-15 minutes per workspace. Tracked via
+  // activity_log so the UI can show progress.
+  await boss.createQueue(SALES_BACKFILL_QUEUE);
+  await boss.work<{ workspaceId: string; actor: string }>(
+    SALES_BACKFILL_QUEUE,
+    async ([job]) => {
+      const { workspaceId, actor } = job.data;
+      const amazon = getAmazonProvider();
+      const dayMs = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const chunks: { start: string; end: string; label: string }[] = [
+        {
+          start: new Date(now - 30 * dayMs).toISOString(),
+          end: new Date(now).toISOString(),
+          label: "days 0-30",
+        },
+        {
+          start: new Date(now - 60 * dayMs).toISOString(),
+          end: new Date(now - 30 * dayMs).toISOString(),
+          label: "days 30-60",
+        },
+        {
+          start: new Date(now - 90 * dayMs).toISOString(),
+          end: new Date(now - 60 * dayMs).toISOString(),
+          label: "days 60-90",
+        },
+      ];
+
+      let totalDailyRows = 0;
+      const errors: string[] = [];
+
+      for (const c of chunks) {
+        try {
+          const orders = await amazon.getOrdersReportInRange(c.start, c.end);
+          if (orders.length === 0) {
+            logger.info(
+              { workspaceId, chunk: c.label },
+              "sales backfill chunk returned 0 orders",
+            );
+            continue;
+          }
+          // Reuse aggregator's per-day output → upsert into daily_sales.
+          const daily = aggregateOrdersByDay(orders);
+          if (daily.length === 0) continue;
+          const CHUNK = 1000;
+          for (let i = 0; i < daily.length; i += CHUNK) {
+            const slice = daily.slice(i, i + CHUNK);
+            await sql`
+              insert into daily_sales (workspace_id, sku, asin, date, units, revenue)
+              select ${workspaceId}, e->>'sku', e->>'asin', (e->>'date')::date,
+                     (e->>'units')::int, (e->>'revenue')::numeric
+                from jsonb_array_elements(${jsonb(slice)}) as e
+              on conflict (workspace_id, sku, date) do update set
+                asin       = coalesce(excluded.asin, daily_sales.asin),
+                units      = excluded.units,
+                revenue    = excluded.revenue,
+                updated_at = now()
+            `;
+          }
+          totalDailyRows += daily.length;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error(
+            { err, workspaceId, chunk: c.label },
+            "sales backfill chunk failed",
+          );
+          errors.push(`${c.label}: ${msg}`);
+        }
+      }
+
+      await recordActivity({
+        workspaceId,
+        actor,
+        action: "updated",
+        entityType: "sku",
+        entityId: null,
+        summary:
+          errors.length === 0
+            ? `Sales backfill complete — ${totalDailyRows} day-rows across 3 chunks`
+            : `Sales backfill finished with errors — ${totalDailyRows} day-rows · ${errors.length} chunk failed`,
+        meta: {
+          stage: "backfill",
+          dailyRows: totalDailyRows,
+          errors: errors.length ? errors : undefined,
+        },
+      });
+      broadcast(workspaceId, {
+        type: "skus_synced",
+        ok: errors.length === 0,
+        stage: "backfill",
+        count: totalDailyRows,
+      });
+    },
+  );
+
+  // ---- Deep historical backfill: workspace-wide via orderMetrics ----
+  // Calls /sales/v1/orderMetrics (NOT the All-Orders Report) in 31-day
+  // chunks for the last ~18 months. orderMetrics has no 60-day window cap
+  // and returns workspace-wide totals without per-SKU detail — perfect for
+  // charts. Stores results in daily_workspace_sales (separate table).
+  await boss.createQueue(SALES_DEEP_BACKFILL_QUEUE);
+  await boss.work<{ workspaceId: string; actor: string }>(
+    SALES_DEEP_BACKFILL_QUEUE,
+    async ([job]) => {
+      const { workspaceId, actor } = job.data;
+      const amazon = getAmazonProvider();
+      const dayMs = 24 * 60 * 60 * 1000;
+      const now = new Date();
+      const totalMonths = 18;
+      let totalDays = 0;
+      const errors: string[] = [];
+
+      // Walk backwards in 31-day chunks. orderMetrics caps single calls at
+      // 31 days for granularity=Day, so a 30-day step gives one extra day
+      // of overlap on each boundary (upsert is idempotent).
+      for (let i = 0; i < totalMonths; i++) {
+        const end = new Date(now.getTime() - i * 30 * dayMs);
+        const start = new Date(end.getTime() - 30 * dayMs);
+        const startDate = start.toISOString().slice(0, 10);
+        const endDate = end.toISOString().slice(0, 10);
+        try {
+          const points = await amazon.getOrderMetricsWorkspace({
+            granularity: "Day",
+            startDate,
+            endDate,
+          });
+          if (points.length === 0) continue;
+          // intervalStart is an ISO timestamp; slice to YYYY-MM-DD. revenue
+          // = unitCount * averageAmount (orderMetrics doesn't give a direct
+          // revenue field, but this is what the legacy app uses).
+          const rows = points
+            .map((p) => ({
+              date: p.intervalStart.slice(0, 10),
+              units: Number(p.unitCount) || 0,
+              revenue: Number(
+                (Number(p.unitCount) * Number(p.averageAmount) || 0).toFixed(2),
+              ),
+            }))
+            .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date));
+          if (rows.length === 0) continue;
+          await sql`
+            insert into daily_workspace_sales (workspace_id, date, units, revenue)
+            select ${workspaceId}, (e->>'date')::date,
+                   (e->>'units')::int, (e->>'revenue')::numeric
+              from jsonb_array_elements(${jsonb(rows)}) as e
+            on conflict (workspace_id, date) do update set
+              units      = excluded.units,
+              revenue    = excluded.revenue,
+              updated_at = now()
+          `;
+          totalDays += rows.length;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error(
+            { err, workspaceId, chunk: `${startDate}..${endDate}` },
+            "deep backfill chunk failed",
+          );
+          errors.push(`${startDate}..${endDate}: ${msg}`);
+        }
+      }
+
+      await recordActivity({
+        workspaceId,
+        actor,
+        action: "updated",
+        entityType: "sku",
+        entityId: null,
+        summary:
+          errors.length === 0
+            ? `Deep backfill complete — ${totalDays} workspace-day rows across ${totalMonths} months`
+            : `Deep backfill finished with ${errors.length} chunk failure(s) — ${totalDays} rows`,
+        meta: {
+          stage: "deep-backfill",
+          dailyRows: totalDays,
+          errors: errors.length ? errors : undefined,
+        },
+      });
+      broadcast(workspaceId, {
+        type: "skus_synced",
+        ok: errors.length === 0,
+        stage: "deep-backfill",
+        count: totalDays,
+      });
+    },
+  );
 
   // ---- Legacy-style 4-stage daily SKUs sync (Asia/Dhaka) ----
   //   8:00  listings (merchant listings report → title/asin/price/qty)

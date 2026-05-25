@@ -6,11 +6,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
+  Area,
+  AreaChart,
   CartesianGrid,
   Cell,
   Legend,
-  Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -66,20 +66,73 @@ interface MonthlyPoint {
   revenue: number;
 }
 
+/** Modern, slightly muted palette — high contrast on white, no neon. */
 const PIE_COLORS = [
-  "#1f47e5",
-  "#14b8a6",
-  "#f97316",
-  "#a855f7",
-  "#ec4899",
-  "#06b6d4",
-  "#84cc16",
-  "#f59e0b",
-  "#dc2626",
+  "#2563eb",
   "#0d9488",
-  "#7c3aed",
+  "#f97316",
+  "#9333ea",
+  "#db2777",
+  "#0891b2",
   "#65a30d",
+  "#d97706",
+  "#dc2626",
+  "#0ea5e9",
+  "#7c3aed",
+  "#16a34a",
 ];
+
+const COLOR_CURRENT = "#2563eb";
+const COLOR_PREVIOUS = "#f97316";
+
+/** Compact tooltip that matches the rest of the app's card aesthetic. */
+function ChartTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ name?: string; value?: number; color?: string }>;
+  label?: string;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  return (
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        padding: "8px 12px",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+        fontSize: 12,
+      }}
+    >
+      {label && (
+        <div style={{ color: "var(--text-3)", marginBottom: 4 }}>{label}</div>
+      )}
+      {payload.map((p, i) => (
+        <div
+          key={i}
+          style={{ display: "flex", alignItems: "center", gap: 6 }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 2,
+              background: p.color,
+              display: "inline-block",
+            }}
+          />
+          <span style={{ color: "var(--text-2)" }}>{p.name}:</span>
+          <strong style={{ color: "var(--text)" }}>
+            {typeof p.value === "number" ? num(p.value) : String(p.value)}
+          </strong>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const MONTH_SHORT = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -96,9 +149,31 @@ function fmtMonth(m: string): string {
   return `${MONTH_SHORT[Number(mm) - 1]} ${y}`;
 }
 
+/**
+ * Signed % change between current and previous interval, clamped to
+ * [-100, +100]. Without the cap the value goes unbounded (e.g. +2001%
+ * when the previous interval only has 1 day of cached history), which
+ * makes the column noisy. -100 = went to zero; +100 = doubled or more.
+ * Direction is preserved via the arrow icon next to the number.
+ */
 function changePct(curr: number, prev: number): number {
   if (prev <= 0) return curr > 0 ? 100 : 0;
-  return Math.round(((curr - prev) / prev) * 100);
+  const raw = ((curr - prev) / prev) * 100;
+  return Math.max(-100, Math.min(100, Math.round(raw)));
+}
+
+/** Compact paginator window with `…` gaps — same shape as the SKUs and
+ *  Inventory pages so all paged tables read identically. */
+function pageWindow(current: number, totalP: number): (number | "…")[] {
+  if (totalP <= 7) return Array.from({ length: totalP }, (_, i) => i + 1);
+  const out: (number | "…")[] = [1];
+  const lo = Math.max(2, current - 2);
+  const hi = Math.min(totalP - 1, current + 2);
+  if (lo > 2) out.push("…");
+  for (let i = lo; i <= hi; i++) out.push(i);
+  if (hi < totalP - 1) out.push("…");
+  out.push(totalP);
+  return out;
 }
 
 /** Last N months ending at the current month, newest first. */
@@ -271,24 +346,70 @@ export function Report() {
       toast.error("Couldn't update favorite", "Please try again."),
   });
 
-  // Selected-row line data: merge current + previous series by date offset
-  // so they overlay on the same x-axis (day index 0..N). Must be declared
-  // BEFORE the early returns below — otherwise the hook count changes
-  // between loading and ready renders.
+  const syncMut = useMutation({
+    mutationFn: () =>
+      api.post<{ ok: boolean; firstTime: boolean }>("/sale-report/sync"),
+    onSuccess: (res) =>
+      toast.info(
+        res.firstTime ? "First-time setup started" : "Sync started",
+        res.firstTime
+          ? "Pulling 18 months of charts data + the last 90 days of per-SKU history from Amazon. First-time setup takes 15-25 minutes total and runs in the background — the report will keep filling in as data lands."
+          : "Refreshing the last 30 days from Amazon. The report refreshes automatically when it's done — usually 2-5 minutes.",
+      ),
+    onError: (err) =>
+      toast.error(
+        "Couldn't start sync",
+        err instanceof Error ? err.message : "Please try again.",
+      ),
+  });
+
+  // First-visit auto-sync — when the daily_sales cache is empty for this
+  // workspace we kick off one sync transparently (mirrors the legacy app's
+  // "data just appears" UX). Guarded so it fires at most once per page
+  // mount; the timestamp lets us show "still waiting…" vs. a real empty
+  // result after a long wait.
+  const [autoSyncStartedAt, setAutoSyncStartedAt] = useState<number | null>(
+    null,
+  );
+  useEffect(() => {
+    if (autoSyncStartedAt != null) return;
+    if (!tableQ.data) return;
+    if (tableQ.data.total > 0) return;
+    if (syncMut.isPending) return;
+    setAutoSyncStartedAt(Date.now());
+    syncMut.mutate();
+  }, [tableQ.data, autoSyncStartedAt, syncMut]);
+
+  // While we're waiting on a sync, re-poll the report every 20s so data
+  // appears as soon as the worker writes its first rows.
+  useEffect(() => {
+    if (autoSyncStartedAt == null) return;
+    if (tableQ.data && tableQ.data.total > 0) return; // done
+    const id = window.setInterval(() => {
+      qc.invalidateQueries({ queryKey: ["sale-report"] });
+    }, 20_000);
+    return () => window.clearInterval(id);
+  }, [autoSyncStartedAt, tableQ.data, qc]);
+
+  // Selected-row line data — merge current + previous series by real
+  // calendar date so they share a single continuous X axis (legacy parity).
+  // When no row is selected, falls back to the workspace-wide daily series.
+  // Must be declared BEFORE the early returns below — otherwise the hook
+  // count changes between loading and ready renders.
   const selectedLine = useMemo(() => {
     if (!selectedRow) return [];
     const cur = selectedDailyCurrentQ.data?.items ?? [];
     const prev = selectedDailyPreviousQ.data?.items ?? [];
-    const n = Math.max(cur.length, prev.length);
-    const out: { day: number; current: number | null; previous: number | null }[] = [];
-    for (let i = 0; i < n; i++) {
-      out.push({
-        day: i + 1,
-        current: cur[i]?.units ?? null,
-        previous: prev[i]?.units ?? null,
-      });
-    }
-    return out;
+    const curMap = new Map(cur.map((p) => [p.date, p.units]));
+    const prevMap = new Map(prev.map((p) => [p.date, p.units]));
+    const allDates = Array.from(
+      new Set([...curMap.keys(), ...prevMap.keys()]),
+    ).sort();
+    return allDates.map((date) => ({
+      date,
+      current: curMap.has(date) ? (curMap.get(date) as number) : null,
+      previous: prevMap.has(date) ? (prevMap.get(date) as number) : null,
+    }));
   }, [
     selectedRow,
     selectedDailyCurrentQ.data,
@@ -339,6 +460,24 @@ export function Report() {
             Compare units sold across two date ranges, by SKU or ASIN.
           </div>
         </div>
+        <button
+          className="btn btn-primary btn-sm"
+          title="First-time: backfills 18 months of charts + 90 days of per-SKU history (15-25 min). After that: refreshes the last 30 days from Amazon (2-5 min)."
+          disabled={syncMut.isPending}
+          onClick={() => syncMut.mutate()}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+          </svg>
+          {syncMut.isPending ? "Starting…" : "Sync from Amazon"}
+        </button>
       </div>
 
       {/* Toolbar */}
@@ -418,31 +557,97 @@ export function Report() {
       <div className="sr-layout">
         <div className="sr-main">
           {items.length === 0 ? (
-            <EmptyState
-              title="Nothing to report yet"
-              message={
-                data.total === 0
-                  ? "Daily sales are cached as the daily sync runs. Wait for the next sales sync (or run one from the Inventory page) to populate this report."
-                  : "Try a different search or date range."
-              }
-            />
+            data.total === 0 && autoSyncStartedAt != null ? (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 14,
+                  padding: "60px 20px",
+                  color: "var(--text-2)",
+                  textAlign: "center",
+                }}
+              >
+                <div className="spinner" />
+                <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text)" }}>
+                  Populating sales data — first-time setup
+                </div>
+                <div style={{ maxWidth: 460, fontSize: 13, lineHeight: 1.55 }}>
+                  Pulling the last 90 days of Amazon orders to build the
+                  daily-sales cache. This usually takes 2-5 minutes; the report
+                  will refresh automatically once data starts arriving.
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-3)" }}>
+                  Started {Math.max(1, Math.floor((Date.now() - autoSyncStartedAt) / 1000))}s ago
+                </div>
+              </div>
+            ) : (
+              <EmptyState
+                title="Nothing to report yet"
+                message={
+                  data.total === 0
+                    ? "Daily sales are cached as the daily sync runs. Click \"Sync sales from Amazon\" above to populate this report."
+                    : "Try a different search or date range."
+                }
+              />
+            )
           ) : (
             <>
-              <div className="sr-table-wrap card">
+              {/* Status line above the table — count + a spinner that shows
+                  during page/filter changes (same pattern as SKUs/Inventory). */}
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "var(--text-2)",
+                  marginBottom: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span>
+                  Showing{" "}
+                  <strong style={{ color: "var(--text)" }}>
+                    {num((page - 1) * pageSize + 1)}-
+                    {num(Math.min(page * pageSize, data.total))}
+                  </strong>{" "}
+                  of{" "}
+                  <strong style={{ color: "var(--text)" }}>
+                    {num(data.total)}
+                  </strong>{" "}
+                  {data.total === 1 ? "product" : "products"}
+                </span>
+                {tableQ.isFetching && !tableQ.isLoading && (
+                  <span
+                    className="spinner-inline"
+                    aria-label="Loading"
+                  />
+                )}
+              </div>
+              <div
+                className={
+                  "sr-table-wrap card" +
+                  (tableQ.isFetching && !tableQ.isLoading
+                    ? " is-refetching"
+                    : "")
+                }
+              >
                 <table className="sr-table">
                   <thead>
                     <tr>
                       <th style={{ width: 36 }} />
                       <th style={{ width: 56 }}>Image</th>
                       <th>Title</th>
-                      <th style={{ width: 130, textAlign: "right" }}>
-                        Current
+                      <th style={{ width: 160, textAlign: "right" }}>
+                        Current Interval Units
                       </th>
-                      <th style={{ width: 130, textAlign: "right" }}>
-                        Previous
+                      <th style={{ width: 160, textAlign: "right" }}>
+                        Previous Interval Units
                       </th>
-                      <th style={{ width: 100, textAlign: "right" }}>
-                        Change
+                      <th style={{ width: 110, textAlign: "right" }}>
+                        Change (%)
                       </th>
                     </tr>
                   </thead>
@@ -523,20 +728,54 @@ export function Report() {
                 <div className="inv-pagination" style={{ marginTop: 16 }}>
                   <button
                     className="inv-page-arrow"
+                    title="Previous page"
                     disabled={page <= 1}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                   >
-                    ←
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
                   </button>
-                  <span style={{ fontSize: 13, padding: "0 8px" }}>
-                    Page {page} of {totalPages}
-                  </span>
+                  {pageWindow(page, totalPages).map((p, i) =>
+                    p === "…" ? (
+                      <span key={`e${i}`} className="inv-page-ellipsis">
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        className={
+                          "inv-page-btn" + (p === page ? " active" : "")
+                        }
+                        onClick={() => setPage(p)}
+                      >
+                        {p}
+                      </button>
+                    ),
+                  )}
                   <button
                     className="inv-page-arrow"
+                    title="Next page"
                     disabled={page >= totalPages}
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   >
-                    →
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
                   </button>
                   <select
                     className="inv-pagesize"
@@ -555,170 +794,315 @@ export function Report() {
           )}
         </div>
 
-        {/* Right rail */}
+        {/* Right rail — shared layout for both workspace and selected-row
+            views. Selected-row view only ADDS a Current-vs-Previous pie next
+            to the By-Month pie, and overrides the bottom line chart with that
+            row's current+previous series by real calendar date (matches the
+            legacy app). */}
         <aside className="sr-rail">
-          {selectedRow ? (
-            <>
-              <div className="card sr-rail-card">
-                <div className="sr-rail-head">
-                  <div>
-                    <div className="sr-rail-title">{selectedRow.title ?? selectedRow.key}</div>
-                    <div className="sr-rail-sub">
-                      {selectedRow.asin ?? ""} · {selectedRow.sku}
-                    </div>
-                  </div>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={() => setDetailFor(selectedRow)}
-                  >
-                    See Details
-                  </button>
+          <div className="card sr-rail-card">
+            <div className="sr-rail-head">
+              <div>
+                <div className="sr-rail-title">
+                  {selectedRow
+                    ? (selectedRow.title ?? selectedRow.key)
+                    : "Workspace totals"}
                 </div>
-
-                <div style={{ height: 200 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={selectedLine}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                      <XAxis
-                        dataKey="day"
-                        tick={{ fontSize: 11 }}
-                        label={{ value: "Day", position: "insideBottom", offset: -2, fontSize: 11 }}
-                      />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Line
-                        name={`Current (${currentRange.start} → ${currentRange.end})`}
-                        type="monotone"
-                        dataKey="current"
-                        stroke="#1f47e5"
-                        dot={false}
-                        connectNulls
-                      />
-                      <Line
-                        name={`Previous (${previousRange.start} → ${previousRange.end})`}
-                        type="monotone"
-                        dataKey="previous"
-                        stroke="#f97316"
-                        dot={false}
-                        connectNulls
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div className="sr-rail-sub">
+                  {selectedRow ? (
+                    <>
+                      {selectedRow.asin ?? ""} · {selectedRow.sku} ·{" "}
+                      {num(selectedRow.currentUnits)} vs{" "}
+                      {num(selectedRow.previousUnits)} units
+                    </>
+                  ) : (
+                    <>
+                      {num(data.totals.currentUnits)} vs{" "}
+                      {num(data.totals.previousUnits)} units
+                      {" · "}
+                      <span
+                        className={
+                          totalsChange > 0
+                            ? "sr-change up"
+                            : totalsChange < 0
+                              ? "sr-change down"
+                              : "sr-change flat"
+                        }
+                      >
+                        {totalsChange > 0
+                          ? "▲"
+                          : totalsChange < 0
+                            ? "▼"
+                            : "→"}{" "}
+                        {Math.abs(totalsChange)}%
+                      </span>
+                    </>
+                  )}
                 </div>
+              </div>
+              {selectedRow && (
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setDetailFor(selectedRow)}
+                >
+                  See Details
+                </button>
+              )}
+            </div>
 
-                <div style={{ height: 180, marginTop: 12 }}>
+            {/* Pie row — Current-vs-Previous appears only when a row is
+                selected; By-Month pie always shows. */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: selectedRow ? "1fr 1fr" : "1fr",
+                gap: 8,
+              }}
+            >
+              {selectedRow && (
+                <div style={{ height: 180 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
+                      <defs>
+                        <linearGradient id="gradCurrent" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={COLOR_CURRENT} stopOpacity={1} />
+                          <stop offset="100%" stopColor={COLOR_CURRENT} stopOpacity={0.75} />
+                        </linearGradient>
+                        <linearGradient id="gradPrevious" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={COLOR_PREVIOUS} stopOpacity={1} />
+                          <stop offset="100%" stopColor={COLOR_PREVIOUS} stopOpacity={0.75} />
+                        </linearGradient>
+                      </defs>
                       <Pie
                         data={selectedCurrPrev}
                         dataKey="value"
                         nameKey="name"
-                        innerRadius={40}
-                        outerRadius={70}
-                        label={(e) => `${e.name}: ${e.value}`}
+                        innerRadius={45}
+                        outerRadius={72}
+                        paddingAngle={2}
+                        stroke="var(--surface)"
+                        strokeWidth={3}
                       >
-                        {selectedCurrPrev.map((s, i) => (
-                          <Cell key={i} fill={s.fill} />
-                        ))}
+                        <Cell fill="url(#gradCurrent)" />
+                        <Cell fill="url(#gradPrevious)" />
                       </Pie>
-                      <Tooltip />
+                      <Tooltip content={<ChartTooltip />} />
+                      <Legend
+                        wrapperStyle={{ fontSize: 11, paddingTop: 6 }}
+                        iconType="circle"
+                        iconSize={8}
+                        verticalAlign="bottom"
+                      />
                     </PieChart>
                   </ResponsiveContainer>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="card sr-rail-card">
-              <div className="sr-rail-head">
-                <div>
-                  <div className="sr-rail-title">Workspace totals</div>
-                  <div className="sr-rail-sub">
-                    {num(data.totals.currentUnits)} vs {num(data.totals.previousUnits)} units
-                    {" · "}
-                    <span
-                      className={
-                        totalsChange > 0
-                          ? "sr-change up"
-                          : totalsChange < 0
-                            ? "sr-change down"
-                            : "sr-change flat"
-                      }
-                    >
-                      {totalsChange > 0 ? "▲" : totalsChange < 0 ? "▼" : "→"}{" "}
-                      {Math.abs(totalsChange)}%
-                    </span>
+                  <div
+                    style={{
+                      textAlign: "center",
+                      fontSize: 11,
+                      color: "var(--text-3)",
+                      marginTop: -4,
+                    }}
+                  >
+                    Current vs Previous
                   </div>
                 </div>
-              </div>
+              )}
 
               {monthlyPie.length > 0 ? (
-                <div style={{ height: 220 }}>
+                <div style={{ height: 180 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
+                      <defs>
+                        {monthlyPie.map((s, i) => (
+                          <linearGradient
+                            key={i}
+                            id={`gradMonth${i}`}
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                          >
+                            <stop offset="0%" stopColor={s.fill} stopOpacity={1} />
+                            <stop offset="100%" stopColor={s.fill} stopOpacity={0.7} />
+                          </linearGradient>
+                        ))}
+                      </defs>
                       <Pie
                         data={monthlyPie}
                         dataKey="value"
                         nameKey="name"
-                        innerRadius={50}
-                        outerRadius={85}
+                        innerRadius={45}
+                        outerRadius={72}
+                        paddingAngle={2}
+                        stroke="var(--surface)"
+                        strokeWidth={3}
                       >
-                        {monthlyPie.map((s, i) => (
-                          <Cell key={i} fill={s.fill} />
+                        {monthlyPie.map((_, i) => (
+                          <Cell key={i} fill={`url(#gradMonth${i})`} />
                         ))}
                       </Pie>
-                      <Tooltip />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Tooltip content={<ChartTooltip />} />
+                      <Legend
+                        wrapperStyle={{ fontSize: 11, paddingTop: 6 }}
+                        iconType="circle"
+                        iconSize={8}
+                        verticalAlign="bottom"
+                      />
                     </PieChart>
                   </ResponsiveContainer>
+                  <div
+                    style={{
+                      textAlign: "center",
+                      fontSize: 11,
+                      color: "var(--text-3)",
+                      marginTop: -4,
+                    }}
+                  >
+                    By Month
+                  </div>
                 </div>
               ) : (
-                <div style={{ fontSize: 13, color: "var(--text-3)", padding: 12 }}>
-                  Select at least one month below to see the monthly breakdown.
-                </div>
+                !selectedRow && (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-3)",
+                      padding: 12,
+                      textAlign: "center",
+                    }}
+                  >
+                    Tick at least one month below to see the breakdown.
+                  </div>
+                )
               )}
+            </div>
 
-              <div className="sr-month-checks">
-                {allMonths.map((m) => (
-                  <label key={m} className="sr-month-check">
-                    <input
-                      type="checkbox"
-                      checked={selectedMonths.includes(m)}
-                      onChange={() => toggleMonth(m)}
-                    />
-                    {fmtMonth(m)}
-                  </label>
-                ))}
-              </div>
+            {/* Month checkboxes — always visible. */}
+            <div className="sr-month-checks">
+              {allMonths.map((m) => (
+                <label key={m} className="sr-month-check">
+                  <input
+                    type="checkbox"
+                    checked={selectedMonths.includes(m)}
+                    onChange={() => toggleMonth(m)}
+                  />
+                  {fmtMonth(m)}
+                </label>
+              ))}
+            </div>
 
-              <div style={{ height: 200, marginTop: 12 }}>
+            {/* Bottom line chart. Selected-row mode overlays Current +
+                Previous by real calendar date; workspace mode is a single
+                workspace-wide daily series scoped to the selected months. */}
+            {selectedRow ? (
+              <div style={{ height: 220, marginTop: 12 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={dailyAllQ.data?.items ?? []}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <AreaChart data={selectedLine} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="areaCurrent" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={COLOR_CURRENT} stopOpacity={0.35} />
+                        <stop offset="100%" stopColor={COLOR_CURRENT} stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="areaPrevious" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={COLOR_PREVIOUS} stopOpacity={0.3} />
+                        <stop offset="100%" stopColor={COLOR_PREVIOUS} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid
+                      strokeDasharray="2 4"
+                      stroke="var(--border)"
+                      vertical={false}
+                    />
                     <XAxis
                       dataKey="date"
-                      tick={{ fontSize: 10 }}
+                      tick={{ fontSize: 10, fill: "var(--text-3)" }}
+                      tickLine={false}
+                      axisLine={{ stroke: "var(--border)" }}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: "var(--text-3)" }}
+                      tickLine={false}
+                      axisLine={false}
+                      width={36}
+                    />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Legend
+                      wrapperStyle={{ fontSize: 11 }}
+                      iconType="circle"
+                      iconSize={8}
+                    />
+                    <Area
+                      name="Current"
+                      type="monotone"
+                      dataKey="current"
+                      stroke={COLOR_CURRENT}
+                      strokeWidth={2}
+                      fill="url(#areaCurrent)"
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                      connectNulls
+                    />
+                    <Area
+                      name="Previous"
+                      type="monotone"
+                      dataKey="previous"
+                      stroke={COLOR_PREVIOUS}
+                      strokeWidth={2}
+                      fill="url(#areaPrevious)"
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                      connectNulls
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div style={{ height: 220, marginTop: 12 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={dailyAllQ.data?.items ?? []}
+                    margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
+                  >
+                    <defs>
+                      <linearGradient id="areaTotal" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#0d9488" stopOpacity={0.4} />
+                        <stop offset="100%" stopColor="#0d9488" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid
+                      strokeDasharray="2 4"
+                      stroke="var(--border)"
+                      vertical={false}
+                    />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 10, fill: "var(--text-3)" }}
+                      tickLine={false}
+                      axisLine={{ stroke: "var(--border)" }}
                       hide={(dailyAllQ.data?.items?.length ?? 0) > 90}
                     />
-                    <YAxis tick={{ fontSize: 11 }} />
-                    <Tooltip
-                      formatter={(value: unknown) => [
-                        typeof value === "number" ? num(value) : String(value),
-                        "Units",
-                      ]}
+                    <YAxis
+                      tick={{ fontSize: 10, fill: "var(--text-3)" }}
+                      tickLine={false}
+                      axisLine={false}
+                      width={36}
                     />
-                    <Line
+                    <Tooltip content={<ChartTooltip />} />
+                    <Area
                       name="Total daily units"
                       type="monotone"
                       dataKey="units"
-                      stroke="#14b8a6"
+                      stroke="#0d9488"
+                      strokeWidth={2}
+                      fill="url(#areaTotal)"
                       dot={false}
+                      activeDot={{ r: 4 }}
                     />
-                  </LineChart>
+                  </AreaChart>
                 </ResponsiveContainer>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </aside>
       </div>
 

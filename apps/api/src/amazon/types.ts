@@ -91,6 +91,13 @@ export interface AmazonProvider {
   /** All-orders flat-file report for the last `daysBack` days. Drives the
    *  per-SKU sales-metrics aggregator (1D / 7D / 15D / 30D buckets). */
   getOrdersReport(daysBack: number): Promise<OrderRow[]>;
+  /** All-orders flat-file report for an explicit [start, end] window. Used by
+   *  the historical-backfill worker to chunk a wider range into 30-day pieces
+   *  (BY_LAST_UPDATE_GENERAL silently returns an empty document past ~60d). */
+  getOrdersReportInRange(
+    dataStartTime: string,
+    dataEndTime: string,
+  ): Promise<OrderRow[]>;
   /** Listings Items API v2021-08-01 GET by SKU with `includedData=summaries`.
    *  Returns the main product image + FBA barcode + display title. The legacy
    *  app called this per SKU via its `api.priceobo.com/image/{sku}` wrapper. */
@@ -114,6 +121,14 @@ export interface AmazonProvider {
     identifierType: "sku" | "asin";
     granularity: "Day" | "Month";
     startDate: string; // YYYY-MM-DD
+    endDate: string;
+  }): Promise<OrderMetric[]>;
+  /** Workspace-wide variant of getOrderMetrics — no per-SKU/ASIN filter.
+   *  Used by the deep-backfill worker to seed daily_workspace_sales for
+   *  charts spanning up to ~2 years. Max 31 days per call. */
+  getOrderMetricsWorkspace(opts: {
+    granularity: "Day" | "Month";
+    startDate: string;
     endDate: string;
   }): Promise<OrderMetric[]>;
 }

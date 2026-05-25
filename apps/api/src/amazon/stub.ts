@@ -71,6 +71,13 @@ export class StubAmazonProvider implements AmazonProvider {
     return [];
   }
 
+  async getOrdersReportInRange(): Promise<OrderRow[]> {
+    logger.warn(
+      "Amazon SP-API not configured — backfill returns no orders",
+    );
+    return [];
+  }
+
   async getListingSummary(): Promise<{
     imageUrl: string | null;
     fnSku: string | null;
@@ -83,6 +90,12 @@ export class StubAmazonProvider implements AmazonProvider {
     Map<string, { itemName: string | null; imageUrl: string | null }>
   > {
     return new Map();
+  }
+
+  async getOrderMetricsWorkspace(): Promise<
+    { intervalStart: string; unitCount: number; averageAmount: number }[]
+  > {
+    return [];
   }
 
   async getOrderMetrics(): Promise<

@@ -52,7 +52,9 @@
       "Bash(curl -s https://backyard.nineyard.com/swagger/v1/swagger.json -o /tmp/swag.json)",
       "Bash(rm -f /tmp/swag.json)",
       "Bash(curl -s https://backyard.nineyard.com/swagger/v1/swagger.json -o ./_swag.json)",
-      "Bash(pnpm add *)"
+      "Bash(pnpm add *)",
+      "Bash(Select-Object -First 30 FullName)",
+      "Bash(timeout 10 bash -c 'while true; do cat \"C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--DEV-DEV-price-brecx\\\\8ed7bf76-bd5f-451a-a4fa-5460b3ff73d1\\\\tasks\\\\b08239hrt.output\" 2>/dev/null && break; sleep 0.5; done')"
     ]
   }
 }

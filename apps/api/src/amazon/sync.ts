@@ -300,10 +300,12 @@ export async function syncFbaStock(workspaceId: string): Promise<StageResult> {
 export async function syncSales(workspaceId: string): Promise<StageResult> {
   const amazon = getAmazonProvider();
   // Same as FBA stage — let errors propagate to the outer wrapper.
-  // 90-day window so a fresh daily_sales cache has ~3 months of history
-  // after the first sync. The rolling 1d/7d/15d/30d aggregates only look at
-  // their own window, so they're unaffected by the larger fetch.
-  const orders = await amazon.getOrdersReport(90);
+  // 30 days is the practical max for a single BY_LAST_UPDATE_GENERAL report
+  // request (Amazon silently returns an empty document past that window).
+  // History longer than 30 days accumulates over time because daily_sales
+  // is upsert-only — each daily sync refreshes the last 30 days but never
+  // deletes older rows, so after N days of syncs you have ~30+N days back.
+  const orders = await amazon.getOrdersReport(30);
   if (orders.length === 0) {
     return { stage: "sales", affected: 0, mode: amazon.mode };
   }

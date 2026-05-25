@@ -596,23 +596,48 @@ export class SpapiProvider implements AmazonProvider {
    * done by amazon/salesAggregator.ts.
    */
   async getOrdersReport(daysBack: number): Promise<OrderRow[]> {
-    const token = await this.getAccessToken();
-    const base = this.creds.endpoint;
     const dataStartTime = new Date(
       Date.now() - daysBack * 24 * 60 * 60 * 1000,
     ).toISOString();
     logger.info(
       `   💰 requesting orders report (last ${daysBack} days, since ${dataStartTime.slice(0, 10)})…`,
     );
+    return this.fetchOrdersReport(dataStartTime, undefined);
+  }
+
+  /** Explicit [start, end] window — for chunked historical backfills. */
+  async getOrdersReportInRange(
+    dataStartTime: string,
+    dataEndTime: string,
+  ): Promise<OrderRow[]> {
+    logger.info(
+      `   💰 requesting orders report (${dataStartTime.slice(0, 10)} → ${dataEndTime.slice(0, 10)})…`,
+    );
+    return this.fetchOrdersReport(dataStartTime, dataEndTime);
+  }
+
+  /** Internal helper shared by getOrdersReport + getOrdersReportInRange. */
+  private async fetchOrdersReport(
+    dataStartTime: string,
+    dataEndTime: string | undefined,
+  ): Promise<OrderRow[]> {
+    const token = await this.getAccessToken();
+    const base = this.creds.endpoint;
 
     let create;
     try {
       create = await axios.post(
         `${base}/reports/2021-06-30/reports`,
         {
+          // BY_LAST_UPDATE_GENERAL accepts ~60 days back. Wider windows
+          // (BY_ORDER_DATE_GENERAL caps at 30 days; both silently return an
+          // empty report when exceeded) need to be chunked into multiple
+          // 30-day requests instead — keep this single report type and the
+          // caller chunks if needed.
           reportType: "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL",
           marketplaceIds: [this.creds.marketplaceId],
           dataStartTime,
+          ...(dataEndTime ? { dataEndTime } : {}),
         },
         { headers: this.authHeaders(token) },
       );
@@ -694,6 +719,45 @@ export class SpapiProvider implements AmazonProvider {
   }): Promise<
     { intervalStart: string; unitCount: number; averageAmount: number }[]
   > {
+    return this.callOrderMetrics({
+      granularity: opts.granularity,
+      startDate: opts.startDate,
+      endDate: opts.endDate,
+      extra: { [opts.identifierType]: opts.identifier },
+    });
+  }
+
+  /**
+   * Workspace-wide variant — no asin/sku filter. Returns the same shape as
+   * getOrderMetrics. Used by the deep-backfill worker to seed
+   * daily_workspace_sales with up to ~2 years of historical chart data
+   * without making per-SKU calls. Max 31 days per call for Day granularity;
+   * caller chunks longer ranges.
+   */
+  async getOrderMetricsWorkspace(opts: {
+    granularity: "Day" | "Month";
+    startDate: string;
+    endDate: string;
+  }): Promise<
+    { intervalStart: string; unitCount: number; averageAmount: number }[]
+  > {
+    return this.callOrderMetrics({
+      granularity: opts.granularity,
+      startDate: opts.startDate,
+      endDate: opts.endDate,
+      extra: {},
+    });
+  }
+
+  /** Internal helper shared by getOrderMetrics + getOrderMetricsWorkspace. */
+  private async callOrderMetrics(opts: {
+    granularity: "Day" | "Month";
+    startDate: string;
+    endDate: string;
+    extra: Record<string, string>;
+  }): Promise<
+    { intervalStart: string; unitCount: number; averageAmount: number }[]
+  > {
     const interval = `${opts.startDate}T00:00:00Z--${opts.endDate}T23:59:59Z`;
     const params: Record<string, string> = {
       marketplaceIds: this.creds.marketplaceId,
@@ -701,7 +765,7 @@ export class SpapiProvider implements AmazonProvider {
       granularity: opts.granularity,
       granularityTimeZone:
         opts.granularity === "Month" ? "UTC" : "America/Los_Angeles",
-      [opts.identifierType]: opts.identifier,
+      ...opts.extra,
     };
     const url = `${this.creds.endpoint}/sales/v1/orderMetrics`;
 
