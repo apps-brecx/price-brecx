@@ -1,10 +1,26 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import {
   buyboxAlertCreateSchema,
   buyboxAlertUpdateSchema,
+  rowMatchesBuyboxFilter,
+  LOST_BUYBOX_REASONS,
   type BuyboxAlert,
+  type LostBuyboxRow,
 } from "@fbm/shared";
 import { sql, jsonb } from "../db.js";
+import { sendMail, isMailerConfigured } from "../mailer.js";
+import { buyBoxLossEmailHtml, buyBoxLossEmailText } from "../lib/emailTemplates.js";
+import { appUrl } from "../env.js";
+import { logger } from "../logger.js";
+
+/** Body for the "send a test now" action — mirrors the on-screen alert form
+ *  (recipients + filter) so it tests exactly what's being edited, saved or not. */
+const buyboxAlertTestSchema = z.object({
+  emails: z.array(z.string().email()).min(1).max(20),
+  reasons: z.array(z.enum(LOST_BUYBOX_REASONS)).default([]),
+  specialOnly: z.boolean().default(false),
+});
 
 const cols = sql`
   id, name, enabled, send_time as "sendTime", timezone, emails,
@@ -69,6 +85,84 @@ export default async function buyboxAlertRoutes(app: FastifyInstance) {
     `;
     if (!row) return reply.code(404).send({ error: "Not found" });
     return row as BuyboxAlert;
+  });
+
+  /**
+   * Send a one-off test digest now, using the supplied recipients + filter
+   * (the current on-screen form), so users can verify a filter/recipient combo
+   * before relying on the schedule. Evaluates the filter against the latest
+   * Lost Buy Box scan and emails the matching rows.
+   */
+  app.post("/buybox-alert/test", async (req, reply) => {
+    const body = buyboxAlertTestSchema.parse(req.body);
+    const wsId = req.user!.workspaceId;
+
+    if (!isMailerConfigured()) {
+      return reply.code(503).send({
+        error:
+          "Email sending isn't configured on the server (SMTP). Ask an admin to set it up.",
+      });
+    }
+
+    const [run] = await sql<
+      {
+        rows: LostBuyboxRow[] | null;
+        marketplaceId: string | null;
+        updatedAt: Date | null;
+      }[]
+    >`
+      select rows, marketplace_id as "marketplaceId", updated_at as "updatedAt"
+        from lost_buybox_runs where workspace_id = ${wsId}
+    `;
+    const allRows = run?.rows ?? [];
+    if (allRows.length === 0) {
+      return reply.code(409).send({
+        error:
+          "No Buy Box losses in the latest scan. Run a scan first, then test.",
+      });
+    }
+
+    const rows = allRows.filter((r) =>
+      rowMatchesBuyboxFilter(r, {
+        reasons: body.reasons,
+        specialOnly: body.specialOnly,
+      }),
+    );
+    if (rows.length === 0) {
+      return { ok: true, sent: false, matched: 0, total: allRows.length };
+    }
+
+    try {
+      await sendMail({
+        to: body.emails,
+        subject: `[Buy Box · TEST] ${rows.length} ASIN${
+          rows.length === 1 ? "" : "s"
+        } match this alert`,
+        html: buyBoxLossEmailHtml({
+          rows,
+          marketplaceId: run?.marketplaceId ?? null,
+          reportUrl: `${appUrl}/buybox`,
+          scannedAt: run?.updatedAt ? run.updatedAt.toISOString() : null,
+        }),
+        text: buyBoxLossEmailText({
+          rows,
+          marketplaceId: run?.marketplaceId ?? null,
+          reportUrl: `${appUrl}/buybox`,
+        }),
+      });
+    } catch (err) {
+      logger.error({ err }, "Buy Box test email failed");
+      return reply
+        .code(502)
+        .send({ error: "Email send failed. Check the SMTP settings." });
+    }
+
+    return {
+      ok: true,
+      sent: true,
+      matched: rows.length,
+      total: allRows.length,
+    };
   });
 
   app.delete("/buybox-alert/:id", async (req, reply) => {

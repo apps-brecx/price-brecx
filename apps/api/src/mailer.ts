@@ -4,6 +4,11 @@ import { logger } from "./logger.js";
 
 let transporter: nodemailer.Transporter | null = null;
 
+/** Whether outbound email is configured (SMTP host + port present). */
+export function isMailerConfigured(): boolean {
+  return Boolean(env.SMTP_HOST && env.SMTP_PORT);
+}
+
 function getTransporter(): nodemailer.Transporter | null {
   if (transporter) return transporter;
   if (!env.SMTP_HOST || !env.SMTP_PORT) return null;

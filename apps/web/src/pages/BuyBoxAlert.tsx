@@ -78,6 +78,41 @@ function AlertCard({ alert }: { alert: BuyboxAlert }) {
       ),
   });
 
+  const sendTest = useMutation({
+    mutationFn: () => {
+      const emails = emailsText
+        .split(/[,\n;]+/)
+        .map((e) => e.trim())
+        .filter(Boolean);
+      return api.post<{
+        ok: boolean;
+        sent: boolean;
+        matched: number;
+        total: number;
+      }>("/buybox-alert/test", { emails, reasons, specialOnly });
+    },
+    onSuccess: (res) => {
+      if (res.sent) {
+        toast.success(
+          "Test email sent",
+          `${res.matched} matching ASIN${
+            res.matched === 1 ? "" : "s"
+          } sent to the recipients.`,
+        );
+      } else {
+        toast.info(
+          "Nothing to send",
+          `The filter matched 0 of ${res.total} current losses. Loosen the filter and try again.`,
+        );
+      }
+    },
+    onError: (err) =>
+      toast.error(
+        "Couldn't send test",
+        err instanceof Error ? err.message : "Please try again.",
+      ),
+  });
+
   const del = useMutation({
     mutationFn: () => api.del(`/buybox-alert/${alert.id}`),
     onSuccess: () => {
@@ -223,6 +258,14 @@ function AlertCard({ alert }: { alert: BuyboxAlert }) {
           onClick={() => save.mutate()}
         >
           {save.isPending ? "Saving…" : "Save changes"}
+        </button>
+        <button
+          className="btn btn-secondary btn-sm"
+          title="Send this alert's email now (using the recipients & filter shown) so you can check it"
+          disabled={sendTest.isPending || !emailsText.trim()}
+          onClick={() => sendTest.mutate()}
+        >
+          {sendTest.isPending ? "Sending…" : "Send test now"}
         </button>
         {alert.lastSentOn && (
           <span style={{ fontSize: 12, color: "var(--text-3)" }}>
