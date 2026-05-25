@@ -34,6 +34,56 @@ function unitsFor(s: Sku, period: "1d" | "7d" | "15d" | "30d"): number {
   return s.salesMetrics?.find((m) => m.period === period)?.units ?? 0;
 }
 
+const CSV_HEADER = [
+  "SKU",
+  "ASIN",
+  "Title",
+  "Status",
+  "Channel",
+  "FBA/FBM",
+  "Price",
+  "Channel Stock",
+  "Sales (30d)",
+] as const;
+
+/** Turn a list of SKUs into CSV text (one SKU per line). Prepends a UTF-8 BOM
+ *  so Excel detects the encoding and renders accents/emoji in titles. */
+function buildSkuCsv(rows: Sku[]): string {
+  const csvCell = (v: string | number | null) => {
+    const str = v == null ? "" : String(v);
+    return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  };
+  const lines = [
+    CSV_HEADER.join(","),
+    ...rows.map((s) =>
+      [
+        s.sku,
+        s.asin ?? "",
+        s.title,
+        s.status,
+        s.channel,
+        fbaLabel(s.fulfillmentChannel) ?? "",
+        s.price,
+        s.stock,
+        unitsFor(s, "30d"),
+      ]
+        .map(csvCell)
+        .join(","),
+    ),
+  ];
+  return "\uFEFF" + lines.join("\r\n");
+}
+
+function downloadCsv(text: string, filename: string) {
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 const emptyDraft: SkuCreateInput = {
   sku: "",
   title: "",
@@ -82,6 +132,7 @@ export function SKUs() {
   const [draft, setDraft] = useState<SkuCreateInput>(emptyDraft);
   const [scheduleFor, setScheduleFor] = useState<Sku | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
 
   // ---- Filters ----
   type ChannelKey =
@@ -420,48 +471,10 @@ export function SKUs() {
   function exportSelectedCsv() {
     const rows = selectedSkuRows();
     if (rows.length === 0) return;
-    const header = [
-      "SKU",
-      "ASIN",
-      "Title",
-      "Status",
-      "Channel",
-      "FBA/FBM",
-      "Price",
-      "Channel Stock",
-      "Sales (30d)",
-    ];
-    const csvCell = (v: string | number | null) => {
-      const s = v == null ? "" : String(v);
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const lines = [
-      header.join(","),
-      ...rows.map((s) =>
-        [
-          s.sku,
-          s.asin ?? "",
-          s.title,
-          s.status,
-          s.channel,
-          fbaLabel(s.fulfillmentChannel) ?? "",
-          s.price,
-          s.stock,
-          unitsFor(s, "30d"),
-        ]
-          .map(csvCell)
-          .join(","),
-      ),
-    ];
-    const blob = new Blob([lines.join("\r\n")], {
-      type: "text/csv;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `skus-selected-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(
+      buildSkuCsv(rows),
+      `skus-selected-${new Date().toISOString().slice(0, 10)}.csv`,
+    );
   }
 
   function bulkSchedule() {
@@ -480,51 +493,31 @@ export function SKUs() {
   const fmtMoney = (n: number) =>
     `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 
-  function exportCsv() {
-    const items = query.data?.items ?? [];
-    if (items.length === 0) return;
-    const header = [
-      "SKU",
-      "ASIN",
-      "Title",
-      "Status",
-      "Channel",
-      "FBA/FBM",
-      "Price",
-      "Channel Stock",
-      "Sales (30d)",
-    ];
-    const csvCell = (v: string | number | null) => {
-      const s = v == null ? "" : String(v);
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const lines = [
-      header.join(","),
-      ...items.map((s) =>
-        [
-          s.sku,
-          s.asin ?? "",
-          s.title,
-          s.status,
-          s.channel,
-          fbaLabel(s.fulfillmentChannel) ?? "",
-          s.price,
-          s.stock,
-          unitsFor(s, "30d"),
-        ]
-          .map(csvCell)
-          .join(","),
-      ),
-    ];
-    const blob = new Blob([lines.join("\r\n")], {
-      type: "text/csv;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `skus-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  /** Download *all* SKUs matching the current search/tab/filters (every page,
+   *  not just the one on screen) as a CSV that opens in Excel. */
+  async function exportAllCsv() {
+    setExporting(true);
+    try {
+      const res = await api.get<{ items: Sku[] }>(
+        `/skus/export${qs({ search, ...tabParams, ...filterParams })}`,
+      );
+      const rows = res.items ?? [];
+      if (rows.length === 0) {
+        toast.info("Nothing to export", "No SKUs match the current filters.");
+        return;
+      }
+      downloadCsv(
+        buildSkuCsv(rows),
+        `skus-${new Date().toISOString().slice(0, 10)}.csv`,
+      );
+    } catch (err) {
+      toast.error(
+        "Export failed",
+        err instanceof Error ? err.message : "Please try again.",
+      );
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -640,9 +633,9 @@ export function SKUs() {
 
         <button
           className="btn btn-secondary btn-sm"
-          title="Download visible SKUs as CSV"
-          disabled={!query.data?.items?.length}
-          onClick={exportCsv}
+          title="Download all SKUs matching the current filters as a CSV (opens in Excel)"
+          disabled={exporting || total === 0}
+          onClick={exportAllCsv}
         >
           <svg
             width="13"
@@ -656,7 +649,7 @@ export function SKUs() {
             <polyline points="7 10 12 15 17 10" />
             <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
-          Export
+          {exporting ? "Exporting…" : "Export All"}
         </button>
 
         <button
