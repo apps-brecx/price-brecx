@@ -51,7 +51,8 @@
       "Bash(grep -n \"channel-icon \\\\${channelMeta.cls}\\\\|channel-icon \\\\${meta.cls}\" apps/web/src/pages/PriceAlert.tsx)",
       "Bash(curl -s https://backyard.nineyard.com/swagger/v1/swagger.json -o /tmp/swag.json)",
       "Bash(rm -f /tmp/swag.json)",
-      "Bash(curl -s https://backyard.nineyard.com/swagger/v1/swagger.json -o ./_swag.json)"
+      "Bash(curl -s https://backyard.nineyard.com/swagger/v1/swagger.json -o ./_swag.json)",
+      "Bash(pnpm add *)"
     ]
   }
 }

@@ -467,8 +467,11 @@ export type BuyboxAlertUpdateInput = z.infer<typeof buyboxAlertUpdateSchema>;
 
 /* ---------------------- Sales Alert ----------------------------- */
 
-/** Scheduled sales-alert email digest config (one per workspace). */
+/** One scheduled sales-alert email digest. A workspace can have many — each
+ *  with its own thresholds, filter (tags / channels), schedule, recipients. */
 export const salesAlertSchema = z.object({
+  id: z.string(),
+  name: z.string(),
   enabled: z.boolean(),
   sendTime: HHMM,
   timezone: z.string(),
@@ -479,13 +482,33 @@ export const salesAlertSchema = z.object({
   thresholdZeroDays: z.number().int().min(1).max(365),
   /** Days-of-supply (stock / daily-velocity) below this → "running out" alert. */
   thresholdLowDays: z.number().int().min(1).max(365),
+  /** Only watch SKUs carrying one of these tag labels; empty = all SKUs. */
+  tagLabels: z.array(z.string()),
+  /** Only watch SKUs on one of these channels; empty = all channels. */
+  channels: z.array(z.enum(SALES_CHANNELS)),
   lastSentOn: z.string().nullable(),
+  createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
 });
 export type SalesAlert = z.infer<typeof salesAlertSchema>;
 
+export const salesAlertCreateSchema = z.object({
+  name: z.string().min(1).max(80).default("Sales alert"),
+  enabled: z.boolean().default(false),
+  sendTime: HHMM.default("09:00"),
+  timezone: z.string().min(1).max(64).default("America/New_York"),
+  emails: z.array(z.string().email()).max(20).default([]),
+  thresholdDropPct: z.number().int().min(1).max(100).default(30),
+  thresholdZeroDays: z.number().int().min(1).max(365).default(14),
+  thresholdLowDays: z.number().int().min(1).max(365).default(14),
+  tagLabels: z.array(z.string().min(1).max(40)).max(40).default([]),
+  channels: z.array(z.enum(SALES_CHANNELS)).default([]),
+});
+export type SalesAlertCreateInput = z.infer<typeof salesAlertCreateSchema>;
+
 export const salesAlertUpdateSchema = z
   .object({
+    name: z.string().min(1).max(80).optional(),
     enabled: z.boolean().optional(),
     sendTime: HHMM.optional(),
     timezone: z.string().min(1).max(64).optional(),
@@ -493,9 +516,97 @@ export const salesAlertUpdateSchema = z
     thresholdDropPct: z.number().int().min(1).max(100).optional(),
     thresholdZeroDays: z.number().int().min(1).max(365).optional(),
     thresholdLowDays: z.number().int().min(1).max(365).optional(),
+    tagLabels: z.array(z.string().min(1).max(40)).max(40).optional(),
+    channels: z.array(z.enum(SALES_CHANNELS)).optional(),
   })
   .refine((b) => Object.keys(b).length > 0, { message: "No fields to update" });
 export type SalesAlertUpdateInput = z.infer<typeof salesAlertUpdateSchema>;
+
+/* ---------------------- Price Alert ----------------------------- */
+
+/** A Price alert's filter: how far below base the price must be for the
+ *  alert to fire, and an optional tag / channel scope. */
+export interface PriceAlertFilter {
+  dropPct: number;
+  tagLabels: string[];
+  channels: string[];
+}
+
+/** Shape of a SKU row used by the price-alert evaluator + the row-matches
+ *  helper. Mirrors the columns the digest cron reads from the DB. */
+export interface PriceAlertRow {
+  sku: string;
+  asin: string | null;
+  productName: string | null;
+  channel: string;
+  basePrice: number | null;
+  price: number | null;
+  tags: { label: string; color: string }[];
+}
+
+/** True when a SKU should be included for the given price-alert filter:
+ *  price strictly below `basePrice * (1 - dropPct/100)`, plus optional
+ *  tag/channel scoping. */
+export function rowMatchesPriceFilter(
+  r: PriceAlertRow,
+  f: PriceAlertFilter,
+): boolean {
+  if (r.basePrice == null || r.price == null) return false;
+  if (r.basePrice <= 0) return false;
+  const threshold = r.basePrice * (1 - f.dropPct / 100);
+  if (r.price >= threshold) return false;
+  if (f.channels.length > 0 && !f.channels.includes(r.channel)) return false;
+  if (f.tagLabels.length > 0) {
+    const have = new Set(r.tags.map((t) => t.label.toLowerCase()));
+    const wanted = f.tagLabels.map((t) => t.toLowerCase());
+    if (!wanted.some((t) => have.has(t))) return false;
+  }
+  return true;
+}
+
+/** One scheduled price-alert email digest. */
+export const priceAlertSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  enabled: z.boolean(),
+  sendTime: HHMM,
+  timezone: z.string(),
+  emails: z.array(z.string().email()),
+  /** Percent below base price required to fire (e.g. 10 = 10% below base). */
+  dropPct: z.number().int().min(1).max(99),
+  tagLabels: z.array(z.string()),
+  channels: z.array(z.enum(SALES_CHANNELS)),
+  lastSentOn: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+});
+export type PriceAlert = z.infer<typeof priceAlertSchema>;
+
+export const priceAlertCreateSchema = z.object({
+  name: z.string().min(1).max(80).default("Price alert"),
+  enabled: z.boolean().default(false),
+  sendTime: HHMM.default("09:00"),
+  timezone: z.string().min(1).max(64).default("America/New_York"),
+  emails: z.array(z.string().email()).max(20).default([]),
+  dropPct: z.number().int().min(1).max(99).default(10),
+  tagLabels: z.array(z.string().min(1).max(40)).max(40).default([]),
+  channels: z.array(z.enum(SALES_CHANNELS)).default([]),
+});
+export type PriceAlertCreateInput = z.infer<typeof priceAlertCreateSchema>;
+
+export const priceAlertUpdateSchema = z
+  .object({
+    name: z.string().min(1).max(80).optional(),
+    enabled: z.boolean().optional(),
+    sendTime: HHMM.optional(),
+    timezone: z.string().min(1).max(64).optional(),
+    emails: z.array(z.string().email()).max(20).optional(),
+    dropPct: z.number().int().min(1).max(99).optional(),
+    tagLabels: z.array(z.string().min(1).max(40)).max(40).optional(),
+    channels: z.array(z.enum(SALES_CHANNELS)).optional(),
+  })
+  .refine((b) => Object.keys(b).length > 0, { message: "No fields to update" });
+export type PriceAlertUpdateInput = z.infer<typeof priceAlertUpdateSchema>;
 
 /* -------------------------- Activity ---------------------------- */
 

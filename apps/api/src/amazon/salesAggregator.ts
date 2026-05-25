@@ -32,6 +32,17 @@ export interface SkuAggregate {
   units30d: number;
 }
 
+/** One (sku, asin, day) tuple — used to upsert daily_sales for the Sale
+ *  Report's date-range queries and multi-month charts. */
+export interface DailySalesRow {
+  sku: string;
+  asin: string | null;
+  /** Local YYYY-MM-DD of the purchase date. */
+  date: string;
+  units: number;
+  revenue: number;
+}
+
 export function aggregateOrders(
   orders: OrderRow[],
   now: Date = new Date(),
@@ -78,6 +89,57 @@ export function aggregateOrders(
       sku,
       metrics,
       units30d: metrics.find((m) => m.period === "30d")?.units ?? 0,
+    });
+  }
+  return out;
+}
+
+/**
+ * Walk the same order rows but group by (sku, day) so the Sale Report can
+ * answer arbitrary date-range queries without re-aggregating each request.
+ * Output is meant to be UPSERTed into `daily_sales` — combined with the cache
+ * that lives there, history accumulates beyond the All-Orders Report window.
+ */
+export function aggregateOrdersByDay(orders: OrderRow[]): DailySalesRow[] {
+  // (sku, day) → { asin, units, revenue }
+  const acc = new Map<
+    string,
+    { sku: string; asin: string | null; date: string; units: number; revenue: number }
+  >();
+
+  for (const o of orders) {
+    if (!o.sku || !o.purchaseDate) continue;
+    if (NON_SALE_STATUSES.has(o.itemStatus)) continue;
+    // YYYY-MM-DD in UTC. The All-Orders Report's purchase-date is itself an
+    // ISO timestamp in UTC, so this is the right slice — switching to the
+    // marketplace timezone is a follow-up if needed.
+    const date = o.purchaseDate.toISOString().slice(0, 10);
+    const key = `${o.sku}${date}`;
+    const cur = acc.get(key);
+    if (cur) {
+      cur.units += o.quantity;
+      cur.revenue += o.itemPrice * o.quantity;
+      // Don't overwrite asin if a later row has it null.
+      if (!cur.asin && o.asin) cur.asin = o.asin;
+    } else {
+      acc.set(key, {
+        sku: o.sku,
+        asin: o.asin ?? null,
+        date,
+        units: o.quantity,
+        revenue: o.itemPrice * o.quantity,
+      });
+    }
+  }
+
+  const out: DailySalesRow[] = [];
+  for (const v of acc.values()) {
+    out.push({
+      sku: v.sku,
+      asin: v.asin,
+      date: v.date,
+      units: v.units,
+      revenue: Number(v.revenue.toFixed(2)),
     });
   }
   return out;

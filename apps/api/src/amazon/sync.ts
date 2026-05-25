@@ -24,7 +24,7 @@
 import { sql, jsonb } from "../db.js";
 import { logger } from "../logger.js";
 import { getAmazonProvider } from "./index.js";
-import { aggregateOrders } from "./salesAggregator.js";
+import { aggregateOrders, aggregateOrdersByDay } from "./salesAggregator.js";
 import { syncProductsFromSkus } from "./productsSync.js";
 
 /** Amazon listing status → our `skus.status` enum. */
@@ -300,7 +300,10 @@ export async function syncFbaStock(workspaceId: string): Promise<StageResult> {
 export async function syncSales(workspaceId: string): Promise<StageResult> {
   const amazon = getAmazonProvider();
   // Same as FBA stage — let errors propagate to the outer wrapper.
-  const orders = await amazon.getOrdersReport(30);
+  // 90-day window so a fresh daily_sales cache has ~3 months of history
+  // after the first sync. The rolling 1d/7d/15d/30d aggregates only look at
+  // their own window, so they're unaffected by the larger fetch.
+  const orders = await amazon.getOrdersReport(90);
   if (orders.length === 0) {
     return { stage: "sales", affected: 0, mode: amazon.mode };
   }
@@ -324,7 +327,32 @@ export async function syncSales(workspaceId: string): Promise<StageResult> {
     affected += res.count ?? 0;
   }
 
-  logger.info({ workspaceId, affected }, "syncSales complete");
+  // Per-day per-SKU cache for the Sale Report. Upsert is idempotent so re-runs
+  // of the same window safely refresh recent days; older days that fall out
+  // of the All-Orders Report window are left untouched, so history grows over
+  // time.
+  const daily = aggregateOrdersByDay(orders);
+  if (daily.length > 0) {
+    for (let i = 0; i < daily.length; i += CHUNK) {
+      const chunk = daily.slice(i, i + CHUNK);
+      await sql`
+        insert into daily_sales (workspace_id, sku, asin, date, units, revenue)
+        select ${workspaceId}, e->>'sku', e->>'asin', (e->>'date')::date,
+               (e->>'units')::int, (e->>'revenue')::numeric
+          from jsonb_array_elements(${jsonb(chunk)}) as e
+        on conflict (workspace_id, sku, date) do update set
+          asin       = coalesce(excluded.asin, daily_sales.asin),
+          units      = excluded.units,
+          revenue    = excluded.revenue,
+          updated_at = now()
+      `;
+    }
+  }
+
+  logger.info(
+    { workspaceId, affected, dailyRows: daily.length },
+    "syncSales complete",
+  );
   return { stage: "sales", affected, mode: amazon.mode };
 }
 

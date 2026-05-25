@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
@@ -49,8 +49,20 @@ export function TagPicker({
   pendingLabel,
 }: TagPickerProps) {
   const [open, setOpen] = useState(false);
+  const [placement, setPlacement] = useState<"down" | "up">("down");
   const popRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLSpanElement>(null);
+
+  // Flip upward when the anchor is close to the bottom of the viewport so the
+  // popover doesn't get clipped (common case: bulk-actions bar pinned to the
+  // bottom of the screen).
+  useLayoutEffect(() => {
+    if (!open || !anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const popHeight = popRef.current?.offsetHeight ?? 320;
+    setPlacement(spaceBelow < popHeight + 16 ? "up" : "down");
+  }, [open]);
 
   const query = useQuery({
     queryKey: ["tag-library", kind],
@@ -84,7 +96,10 @@ export function TagPicker({
     <span ref={anchorRef} className="tag-picker-anchor">
       {children(() => setOpen((v) => !v))}
       {open && (
-        <div className="tag-picker-pop" ref={popRef}>
+        <div
+          className={"tag-picker-pop placement-" + placement}
+          ref={popRef}
+        >
           <div className="tag-picker-head">
             {kind === "sku"
               ? "SKU tags"

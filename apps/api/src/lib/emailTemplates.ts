@@ -325,6 +325,124 @@ export function salesAlertEmailText(opts: {
     .join("\n");
 }
 
+export interface PriceAlertRowForEmail {
+  sku: string;
+  asin: string | null;
+  title: string;
+  channel: string;
+  basePrice: number;
+  price: number;
+  dropPct: number;
+}
+
+/** Price alert digest — list SKUs whose current price is below their base
+ *  price by at least the alert's drop-percent threshold. */
+export function priceAlertEmailHtml(opts: {
+  rows: PriceAlertRowForEmail[];
+  dropPct: number;
+  reportUrl: string;
+}): string {
+  const { rows, dropPct, reportUrl } = opts;
+  const top = rows.slice(0, 20);
+  const bodyRows = top
+    .map(
+      (r) => `
+      <tr>
+        <td style="padding:9px 12px;border-bottom:1px solid #f0f1f3;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:600;color:#111827;">${escapeHtml(r.sku)}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f0f1f3;font-size:12px;color:#6b7280;">${escapeHtml(r.asin ?? "—")}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f0f1f3;font-size:12px;color:#111827;">${escapeHtml(r.title.slice(0, 60))}${r.title.length > 60 ? "…" : ""}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f0f1f3;font-size:12px;color:#6b7280;text-align:right;text-decoration:line-through;">${fmtPrice(r.basePrice)}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f0f1f3;font-size:12px;color:#111827;font-weight:600;text-align:right;">${fmtPrice(r.price)}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid #f0f1f3;font-size:12px;color:#b91c1c;font-weight:600;text-align:right;">−${r.dropPct}%</td>
+      </tr>`,
+    )
+    .join("");
+
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">
+      ${rows.length} SKU${rows.length === 1 ? "" : "s"} priced below base on Priceobo.
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e6e8eb;">
+            <tr>
+              <td style="background:#4f46e5;padding:24px 32px;">
+                <span style="color:#ffffff;font-size:18px;font-weight:700;">Priceobo</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px;">
+                <h1 style="margin:0 0 8px;font-size:20px;color:#111827;">Price alert digest</h1>
+                <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151;">
+                  <strong>${rows.length}</strong> SKU${rows.length === 1 ? "" : "s"} priced at least <strong>${dropPct}%</strong> below base price.
+                </p>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e6e8eb;border-radius:8px;overflow:hidden;border-collapse:separate;">
+                  <thead>
+                    <tr style="background:#f9fafb;">
+                      <th style="padding:9px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:600;border-bottom:1px solid #e6e8eb;">SKU</th>
+                      <th style="padding:9px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:600;border-bottom:1px solid #e6e8eb;">ASIN</th>
+                      <th style="padding:9px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:600;border-bottom:1px solid #e6e8eb;">Product</th>
+                      <th style="padding:9px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:600;border-bottom:1px solid #e6e8eb;">Base</th>
+                      <th style="padding:9px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:600;border-bottom:1px solid #e6e8eb;">Now</th>
+                      <th style="padding:9px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#9ca3af;font-weight:600;border-bottom:1px solid #e6e8eb;">Drop</th>
+                    </tr>
+                  </thead>
+                  <tbody>${bodyRows}</tbody>
+                </table>
+                ${rows.length > 20 ? `<p style="margin:12px 0 0;font-size:12px;color:#9ca3af;">+ ${rows.length - 20} more in the report</p>` : ""}
+                <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:24px;">
+                  <tr>
+                    <td style="border-radius:8px;background:#4f46e5;">
+                      <a href="${reportUrl}" style="display:inline-block;padding:12px 28px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">Open Price Alerts</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 32px;background:#f9fafb;border-top:1px solid #e6e8eb;">
+                <p style="margin:0;font-size:11px;color:#9ca3af;">
+                  You're receiving this because Price Alerts are enabled for your workspace. Manage the schedule and threshold in Priceobo → Price Alert.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+/** Plain-text counterpart of {@link priceAlertEmailHtml}. */
+export function priceAlertEmailText(opts: {
+  rows: PriceAlertRowForEmail[];
+  dropPct: number;
+  reportUrl: string;
+}): string {
+  const { rows, dropPct, reportUrl } = opts;
+  return [
+    `Price alerts — ${rows.length} SKU${rows.length === 1 ? "" : "s"} priced ≥ ${dropPct}% below base`,
+    "",
+    ...rows
+      .slice(0, 40)
+      .map(
+        (r) =>
+          `- ${r.sku} (${r.channel}): ${fmtPrice(r.price)} vs base ${fmtPrice(r.basePrice)} (−${r.dropPct}%) — ${r.title.slice(0, 60)}`,
+      ),
+    rows.length > 40 ? `…and ${rows.length - 40} more` : "",
+    "",
+    `Open the report: ${reportUrl}`,
+    "",
+    "— Priceobo",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function inviteEmailHtml(opts: {
   workspaceName: string;
   inviterName: string;

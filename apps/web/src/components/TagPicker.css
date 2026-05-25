@@ -10,7 +10,6 @@
 
 .tag-picker-pop {
   position: absolute;
-  top: calc(100% + 4px);
   left: 0;
   z-index: 60;
   min-width: 220px;
@@ -22,6 +21,11 @@
   overflow: hidden;
   font-size: 12.5px;
 }
+/* Default: open below the anchor. */
+.tag-picker-pop.placement-down { top: calc(100% + 4px); }
+/* Flipped: open above the anchor (used when the trigger is near the bottom
+   of the viewport — e.g. SKUs page bulk-actions bar). */
+.tag-picker-pop.placement-up { bottom: calc(100% + 4px); }
 
 .tag-picker-head {
   padding: 8px 12px;

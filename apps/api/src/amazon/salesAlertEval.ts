@@ -34,6 +34,11 @@ export interface SalesAlertThresholds {
   thresholdDropPct: number;
   thresholdZeroDays: number;
   thresholdLowDays: number;
+  /** Restrict to SKUs carrying at least one of these tag labels;
+   *  omit / empty = all tags. */
+  tagLabels?: string[];
+  /** Restrict to SKUs on one of these channels; omit / empty = all. */
+  channels?: string[];
 }
 
 interface Row {
@@ -46,6 +51,19 @@ interface Row {
   sales7d: number;
   sales15d: number;
   sales30d: number;
+}
+
+interface DbRow {
+  skuId: string;
+  sku: string;
+  asin: string | null;
+  title: string;
+  imageUrl: string | null;
+  stock: number;
+  salesMetrics: unknown;
+  sales30d: number;
+  channel: string;
+  tags: { label: string; color: string }[] | null;
 }
 
 function metricUnits(metrics: unknown, period: string): number {
@@ -63,18 +81,8 @@ export async function evaluateSalesAlerts(
   t: SalesAlertThresholds,
 ): Promise<SalesAlertItem[]> {
   // Read raw signals — 7d/15d/30d sales from sales_metrics jsonb, plus stock.
-  const rows = await sql<
-    {
-      skuId: string;
-      sku: string;
-      asin: string | null;
-      title: string;
-      imageUrl: string | null;
-      stock: number;
-      salesMetrics: unknown;
-      sales30d: number;
-    }[]
-  >`
+  // Channel + tags are joined so the caller can scope the alert to a subset.
+  const rows = await sql<DbRow[]>`
     select id as "skuId", sku, asin, title, image_url as "imageUrl",
            greatest(
              stock,
@@ -83,13 +91,30 @@ export async function evaluateSalesAlerts(
                + coalesce(fba_pending_transship_quantity,0)
            ) as stock,
            sales_metrics as "salesMetrics",
-           sales_30d as "sales30d"
+           sales_30d as "sales30d",
+           channel,
+           tags
       from skus
      where workspace_id = ${workspaceId}
        and status = 'active'
   `;
 
-  const enriched: Row[] = rows.map((r) => ({
+  const channelFilter = (t.channels ?? []).filter(Boolean);
+  const tagFilter = (t.tagLabels ?? [])
+    .map((s) => s.toLowerCase())
+    .filter(Boolean);
+
+  const filteredRows = rows.filter((r) => {
+    if (channelFilter.length > 0 && !channelFilter.includes(r.channel))
+      return false;
+    if (tagFilter.length > 0) {
+      const have = new Set((r.tags ?? []).map((x) => x.label.toLowerCase()));
+      if (!tagFilter.some((label) => have.has(label))) return false;
+    }
+    return true;
+  });
+
+  const enriched: Row[] = filteredRows.map((r) => ({
     skuId: r.skuId,
     sku: r.sku,
     asin: r.asin,

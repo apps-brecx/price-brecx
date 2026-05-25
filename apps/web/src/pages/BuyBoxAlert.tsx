@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { relativeTime } from "../lib/format";
 import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { useToast } from "../components/Toast";
 import "./BuyBoxAlert.css";
 
@@ -45,6 +46,7 @@ function AlertCard({ alert }: { alert: BuyboxAlert }) {
   const [emailsText, setEmailsText] = useState(alert.emails.join(", "));
   const [reasons, setReasons] = useState<Reason[]>(alert.reasons);
   const [specialOnly, setSpecialOnly] = useState(alert.specialOnly);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const save = useMutation({
     mutationFn: () => {
@@ -144,9 +146,7 @@ function AlertCard({ alert }: { alert: BuyboxAlert }) {
         <button
           className="btn btn-secondary btn-xs"
           disabled={del.isPending}
-          onClick={() => {
-            if (window.confirm(`Delete "${alert.name}"?`)) del.mutate();
-          }}
+          onClick={() => setConfirmOpen(true)}
         >
           {del.isPending ? "Deleting…" : "Delete"}
         </button>
@@ -278,6 +278,20 @@ function AlertCard({ alert }: { alert: BuyboxAlert }) {
           </span>
         )}
       </div>
+
+      <ConfirmModal
+        open={confirmOpen}
+        title="Delete alert?"
+        message={`"${alert.name}" will stop sending and its history will be removed. This can't be undone.`}
+        confirmLabel="Delete alert"
+        destructive
+        busy={del.isPending}
+        onConfirm={() => {
+          del.mutate();
+          setConfirmOpen(false);
+        }}
+        onClose={() => setConfirmOpen(false)}
+      />
     </div>
   );
 }

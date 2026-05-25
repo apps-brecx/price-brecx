@@ -1,18 +1,71 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import type { ReportRow } from "@fbm/shared";
-import { api } from "../lib/api";
-import { money, num } from "../lib/format";
+import { useEffect, useMemo, useState } from "react";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import {
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { api, qs } from "../lib/api";
+import { num } from "../lib/format";
 import { Loading, ErrorState, EmptyState } from "../components/EmptyState";
+import { DateRangePicker } from "../components/DateRangePicker";
+import { SalesReportModal } from "../components/SalesReportModal";
+import { useToast } from "../components/Toast";
+import "./Report.css";
+import "./BuyBoxAlert.css";
+import "./Inventory.css";
 
-interface SalesReport {
-  items: ReportRow[];
-  totals: { units: number; revenue: number };
+interface TableRow {
+  key: string;
+  skuId: string;
+  sku: string;
+  asin: string | null;
+  title: string | null;
+  imageUrl: string | null;
+  favorite: boolean;
+  currentUnits: number;
+  currentRevenue: number;
+  previousUnits: number;
+  previousRevenue: number;
 }
 
-const PAGE_SIZE = 25;
+interface TableResponse {
+  items: TableRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totals: {
+    currentUnits: number;
+    currentRevenue: number;
+    previousUnits: number;
+    previousRevenue: number;
+  };
+}
 
-/** Distinct palette for the donut / legend (real data, fixed colors). */
+interface DailyPoint {
+  date: string;
+  units: number;
+  revenue: number;
+}
+interface MonthlyPoint {
+  month: string;
+  units: number;
+  revenue: number;
+}
+
 const PIE_COLORS = [
   "#1f47e5",
   "#14b8a6",
@@ -22,251 +75,275 @@ const PIE_COLORS = [
   "#06b6d4",
   "#84cc16",
   "#f59e0b",
+  "#dc2626",
+  "#0d9488",
+  "#7c3aed",
+  "#65a30d",
 ];
-const OTHER_COLOR = "#cbd2dd";
 
-interface DonutSlice {
-  label: string;
-  value: number;
-  color: string;
-  pct: number;
+const MONTH_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/**
- * Inline SVG donut driven entirely by real revenue data.
- * No chart library is installed — slices are circle stroke-dasharray arcs.
- */
-function Donut({ slices }: { slices: DonutSlice[] }) {
-  const total = slices.reduce((s, x) => s + x.value, 0);
-  const r = 60;
-  const c = 2 * Math.PI * r;
-  let offset = 0;
+function fmtMonth(m: string): string {
+  // "2026-05" → "May 2026"
+  const [y, mm] = m.split("-");
+  return `${MONTH_SHORT[Number(mm) - 1]} ${y}`;
+}
 
-  if (total <= 0) {
-    return (
-      <svg viewBox="0 0 160 160" width="100%" height="100%" role="img">
-        <circle
-          cx="80"
-          cy="80"
-          r={r}
-          fill="none"
-          stroke="var(--surface-2)"
-          strokeWidth="22"
-        />
-      </svg>
-    );
+function changePct(curr: number, prev: number): number {
+  if (prev <= 0) return curr > 0 ? 100 : 0;
+  return Math.round(((curr - prev) / prev) * 100);
+}
+
+/** Last N months ending at the current month, newest first. */
+function lastMonths(n: number): string[] {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = 0; i < n; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   }
-
-  return (
-    <svg viewBox="0 0 160 160" width="100%" height="100%" role="img">
-      <g transform="rotate(-90 80 80)">
-        {slices.map((s) => {
-          const len = (s.value / total) * c;
-          const seg = (
-            <circle
-              key={s.label}
-              cx="80"
-              cy="80"
-              r={r}
-              fill="none"
-              stroke={s.color}
-              strokeWidth="22"
-              strokeDasharray={`${len} ${c - len}`}
-              strokeDashoffset={-offset}
-            />
-          );
-          offset += len;
-          return seg;
-        })}
-      </g>
-    </svg>
-  );
+  return out;
 }
-
-/**
- * Tiny inline SVG bar pair comparing the selected SKU's units vs revenue.
- * Each metric is normalized against the dataset max so bars stay readable.
- */
-function CompareBars({
-  units,
-  revenue,
-  maxUnits,
-  maxRevenue,
-}: {
-  units: number;
-  revenue: number;
-  maxUnits: number;
-  maxRevenue: number;
-}) {
-  const W = 240;
-  const H = 130;
-  const pad = 8;
-  const baseY = H - 22;
-  const barW = 70;
-  const maxBarH = baseY - pad;
-  const uH = maxUnits > 0 ? (units / maxUnits) * maxBarH : 0;
-  const rH = maxRevenue > 0 ? (revenue / maxRevenue) * maxBarH : 0;
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img">
-      <line
-        x1={pad}
-        y1={baseY}
-        x2={W - pad}
-        y2={baseY}
-        stroke="var(--border)"
-        strokeWidth="1"
-      />
-      <rect
-        x={W * 0.28 - barW / 2}
-        y={baseY - uH}
-        width={barW}
-        height={uH}
-        rx="4"
-        fill="#1f47e5"
-      />
-      <rect
-        x={W * 0.72 - barW / 2}
-        y={baseY - rH}
-        width={barW}
-        height={rH}
-        rx="4"
-        fill="#14b8a6"
-      />
-      <text
-        x={W * 0.28}
-        y={baseY + 14}
-        textAnchor="middle"
-        fontSize="10.5"
-        fill="var(--text-3)"
-      >
-        Units
-      </text>
-      <text
-        x={W * 0.72}
-        y={baseY + 14}
-        textAnchor="middle"
-        fontSize="10.5"
-        fill="var(--text-3)"
-      >
-        Revenue
-      </text>
-    </svg>
-  );
-}
-
-const CopyIcon = () => (
-  <svg
-    width="10"
-    height="10"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-  >
-    <rect x="9" y="9" width="13" height="13" rx="2" />
-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-  </svg>
-);
 
 export function Report() {
-  const query = useQuery({
-    queryKey: ["reports", "sales"],
-    queryFn: () => api.get<SalesReport>("/reports/sales"),
+  const qc = useQueryClient();
+  const toast = useToast();
+
+  // Default current = last 30 days; previous = the 30 days before that.
+  const today = useMemo(() => new Date(), []);
+  const def = useMemo(() => {
+    const t = new Date(today);
+    const currentEnd = ymd(t);
+    const currentStartD = new Date(t);
+    currentStartD.setDate(t.getDate() - 29);
+    const currentStart = ymd(currentStartD);
+    const previousEndD = new Date(currentStartD);
+    previousEndD.setDate(currentStartD.getDate() - 1);
+    const previousEnd = ymd(previousEndD);
+    const previousStartD = new Date(previousEndD);
+    previousStartD.setDate(previousEndD.getDate() - 29);
+    const previousStart = ymd(previousStartD);
+    return { currentStart, currentEnd, previousStart, previousEnd };
+  }, [today]);
+
+  const [currentRange, setCurrentRange] = useState<{ start: string; end: string }>({
+    start: def.currentStart,
+    end: def.currentEnd,
+  });
+  const [previousRange, setPreviousRange] = useState<{ start: string; end: string }>({
+    start: def.previousStart,
+    end: def.previousEnd,
+  });
+  const [mode, setMode] = useState<"sku" | "asin">("asin");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  // Month checkboxes for the right-rail line / pie. Default to the last 3
+  // months so the chart isn't empty on first paint.
+  const allMonths = useMemo(() => lastMonths(13), []);
+  const [selectedMonths, setSelectedMonths] = useState<string[]>(() =>
+    lastMonths(3),
+  );
+
+  const [detailFor, setDetailFor] = useState<TableRow | null>(null);
+
+  // Debounce search input so we don't refetch on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 250);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // Reset page on filter change.
+  useEffect(() => {
+    setPage(1);
+  }, [search, mode, favoritesOnly, currentRange, previousRange, pageSize]);
+
+  const tableQ = useQuery({
+    queryKey: [
+      "sale-report",
+      { currentRange, previousRange, mode, search, favoritesOnly, page, pageSize },
+    ],
+    queryFn: () =>
+      api.get<TableResponse>(
+        "/sale-report" +
+          qs({
+            currentStart: currentRange.start,
+            currentEnd: currentRange.end,
+            previousStart: previousRange.start,
+            previousEnd: previousRange.end,
+            mode,
+            search: search || undefined,
+            favoritesOnly: favoritesOnly ? "true" : undefined,
+            page,
+            pageSize,
+          }),
+      ),
+    placeholderData: keepPreviousData,
   });
 
-  const data = query.data;
+  // Daily workspace-wide series for the bottom-right chart, scoped to the
+  // selected months. Concat (start-of-first-month) → (end-of-last-month).
+  const monthBounds = useMemo(() => {
+    if (selectedMonths.length === 0) return null;
+    const sorted = [...selectedMonths].sort();
+    const first = sorted[0]!;
+    const last = sorted[sorted.length - 1]!;
+    const [fy, fm] = first.split("-").map(Number);
+    const [ly, lm] = last.split("-").map(Number);
+    const start = `${fy}-${String(fm).padStart(2, "0")}-01`;
+    const endD = new Date(ly!, lm!, 0); // last day of `last`
+    const end = ymd(endD);
+    return { start, end };
+  }, [selectedMonths]);
 
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(0);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const dailyAllQ = useQuery({
+    queryKey: ["sale-report", "daily", monthBounds, mode],
+    queryFn: () =>
+      api.get<{ items: DailyPoint[] }>(
+        "/sale-report/daily" +
+          qs({ start: monthBounds!.start, end: monthBounds!.end, mode }),
+      ),
+    enabled: !!monthBounds,
+  });
 
-  // Real data, sorted by revenue desc.
-  const sorted = useMemo(
-    () => [...(data?.items ?? [])].sort((a, b) => b.revenue - a.revenue),
-    [data],
+  const monthlyAllQ = useQuery({
+    queryKey: ["sale-report", "monthly", selectedMonths, mode],
+    queryFn: () =>
+      api.get<{ items: MonthlyPoint[] }>(
+        "/sale-report/monthly" +
+          qs({ months: selectedMonths.join(","), mode }),
+      ),
+    enabled: selectedMonths.length > 0,
+  });
+
+  // Selected-row series (current + previous intervals overlaid).
+  const selectedRow = useMemo(
+    () => tableQ.data?.items.find((r) => r.key === selectedKey) ?? null,
+    [tableQ.data, selectedKey],
   );
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return sorted;
-    return sorted.filter(
-      (r) =>
-        r.title.toLowerCase().includes(q) || r.sku.toLowerCase().includes(q),
-    );
-  }, [sorted, search]);
+  const selectedDailyCurrentQ = useQuery({
+    queryKey: ["sale-report", "daily-selected-current", selectedKey, currentRange, mode],
+    queryFn: () =>
+      api.get<{ items: DailyPoint[] }>(
+        "/sale-report/daily" +
+          qs({
+            start: currentRange.start,
+            end: currentRange.end,
+            identifier: selectedKey!,
+            mode,
+          }),
+      ),
+    enabled: !!selectedKey,
+  });
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount - 1);
-  const pageRows = filtered.slice(
-    safePage * PAGE_SIZE,
-    safePage * PAGE_SIZE + PAGE_SIZE,
-  );
+  const selectedDailyPreviousQ = useQuery({
+    queryKey: ["sale-report", "daily-selected-previous", selectedKey, previousRange, mode],
+    queryFn: () =>
+      api.get<{ items: DailyPoint[] }>(
+        "/sale-report/daily" +
+          qs({
+            start: previousRange.start,
+            end: previousRange.end,
+            identifier: selectedKey!,
+            mode,
+          }),
+      ),
+    enabled: !!selectedKey,
+  });
 
-  // Donut: top SKUs by revenue (real data); remainder grouped as "Other".
-  const donutSlices = useMemo<DonutSlice[]>(() => {
-    if (sorted.length === 0) return [];
-    const totalRev = sorted.reduce((s, r) => s + r.revenue, 0);
-    if (totalRev <= 0) return [];
-    const topN = sorted.slice(0, PIE_COLORS.length);
-    const slices: DonutSlice[] = topN.map((r, i) => ({
-      label: r.title,
-      value: r.revenue,
-      color: PIE_COLORS[i],
-      pct: (r.revenue / totalRev) * 100,
-    }));
-    const rest = sorted.slice(PIE_COLORS.length);
-    const restRev = rest.reduce((s, r) => s + r.revenue, 0);
-    if (restRev > 0) {
-      slices.push({
-        label: `Other (${rest.length})`,
-        value: restRev,
-        color: OTHER_COLOR,
-        pct: (restRev / totalRev) * 100,
+  const toggleFavorite = useMutation({
+    mutationFn: ({ skuId, favorite }: { skuId: string; favorite: boolean }) =>
+      api.patch(`/skus/${skuId}`, { favorite }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sale-report"] }),
+    onError: () =>
+      toast.error("Couldn't update favorite", "Please try again."),
+  });
+
+  // Selected-row line data: merge current + previous series by date offset
+  // so they overlay on the same x-axis (day index 0..N). Must be declared
+  // BEFORE the early returns below — otherwise the hook count changes
+  // between loading and ready renders.
+  const selectedLine = useMemo(() => {
+    if (!selectedRow) return [];
+    const cur = selectedDailyCurrentQ.data?.items ?? [];
+    const prev = selectedDailyPreviousQ.data?.items ?? [];
+    const n = Math.max(cur.length, prev.length);
+    const out: { day: number; current: number | null; previous: number | null }[] = [];
+    for (let i = 0; i < n; i++) {
+      out.push({
+        day: i + 1,
+        current: cur[i]?.units ?? null,
+        previous: prev[i]?.units ?? null,
       });
     }
-    return slices;
-  }, [sorted]);
+    return out;
+  }, [
+    selectedRow,
+    selectedDailyCurrentQ.data,
+    selectedDailyPreviousQ.data,
+  ]);
 
-  const maxUnits = useMemo(
-    () => sorted.reduce((m, r) => Math.max(m, r.units), 0),
-    [sorted],
-  );
-  const maxRevenue = useMemo(
-    () => sorted.reduce((m, r) => Math.max(m, r.revenue), 0),
-    [sorted],
-  );
-
-  const selected = useMemo(
-    () => sorted.find((r) => r.skuId === selectedId) ?? null,
-    [sorted, selectedId],
-  );
-
-  function toggleFav(id: string) {
-    setFavorites((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function toggleMonth(m: string) {
+    setSelectedMonths((prev) =>
+      prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m],
+    );
   }
 
-  function copy(text: string) {
-    void navigator.clipboard?.writeText(text);
-  }
+  if (tableQ.isLoading) return <Loading />;
+  if (tableQ.isError) return <ErrorState />;
 
-  if (query.isLoading) return <Loading />;
-  if (query.isError || !data) return <ErrorState />;
+  const data = tableQ.data!;
+  const items = data.items;
+  const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
+  const totalsChange = changePct(
+    data.totals.currentUnits,
+    data.totals.previousUnits,
+  );
 
-  const showingFrom = filtered.length === 0 ? 0 : safePage * PAGE_SIZE + 1;
-  const showingTo = Math.min(filtered.length, safePage * PAGE_SIZE + PAGE_SIZE);
+  // Pie data — the right-rail "by month" donut.
+  const monthlyPie = (monthlyAllQ.data?.items ?? [])
+    .filter((m) => m.units > 0)
+    .map((m, i) => ({
+      name: fmtMonth(m.month),
+      value: m.units,
+      fill: PIE_COLORS[i % PIE_COLORS.length],
+    }));
+
+  // Selected row pies.
+  const selectedCurrPrev = selectedRow
+    ? [
+        { name: "Current", value: selectedRow.currentUnits, fill: "#1f47e5" },
+        { name: "Previous", value: selectedRow.previousUnits, fill: "#f97316" },
+      ]
+    : [];
 
   return (
-    <div className="rp-page-wrap">
-      {/* Toolbar: search + static range pill + real totals */}
-      <div className="rp-toolbar">
-        <div className="input-wrap" style={{ flex: 1, maxWidth: 380 }}>
+    <div className="sr-page">
+      {/* Header */}
+      <div className="sr-header">
+        <div>
+          <h1 className="sr-title">Sale Report</h1>
+          <div className="sr-sub">
+            Compare units sold across two date ranges, by SKU or ASIN.
+          </div>
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="sr-toolbar">
+        <div className="input-wrap" style={{ minWidth: 240 }}>
           <svg
             className="input-icon"
             width="14"
@@ -281,349 +358,381 @@ export function Report() {
           </svg>
           <input
             className="input"
-            placeholder="Search by Product Name or SKU..."
+            placeholder="Search ASIN, SKU, title…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             style={{ width: "100%" }}
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(0);
-            }}
           />
         </div>
 
-        {/* Range pill is a static visual: the endpoint has no range param. */}
-        <div className="rp-range-pill" aria-disabled title="No date range available">
-          <svg
-            width="11"
-            height="11"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <rect x="3" y="4" width="18" height="18" rx="2" />
-            <line x1="16" y1="2" x2="16" y2="6" />
-            <line x1="8" y1="2" x2="8" y2="6" />
-            <line x1="3" y1="10" x2="21" y2="10" />
-          </svg>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: "var(--text-3)",
-              textTransform: "uppercase",
-              letterSpacing: ".04em",
-            }}
-          >
-            Range
-          </span>
-          <span style={{ color: "var(--text-2)", fontWeight: 600 }}>
-            All time
-          </span>
+        <div className="sr-toggle">
+          <span className="sr-toggle-label">ASIN mode</span>
+          <div
+            className={"bba-toggle" + (mode === "asin" ? " on" : "")}
+            role="switch"
+            aria-checked={mode === "asin"}
+            onClick={() => setMode(mode === "asin" ? "sku" : "asin")}
+          />
         </div>
 
-        <div style={{ flex: 1 }} />
-
-        {/* Real totals from the API */}
-        <div className="rp-toggle">
-          <span className="rp-toggle-label">Total Units</span>
-          <span style={{ fontWeight: 700, fontSize: 13.5 }}>
-            {num(data.totals.units)}
-          </span>
+        <div className="sr-toggle">
+          <span className="sr-toggle-label">Favorites only</span>
+          <div
+            className={"bba-toggle" + (favoritesOnly ? " on" : "")}
+            role="switch"
+            aria-checked={favoritesOnly}
+            onClick={() => setFavoritesOnly((v) => !v)}
+          />
         </div>
-        <div className="rp-toggle">
-          <span className="rp-toggle-label">Total Revenue</span>
-          <span style={{ fontWeight: 700, fontSize: 13.5 }}>
-            {money(data.totals.revenue)}
-          </span>
+
+        <div className="sr-range-group">
+          <span className="sr-range-label">Current</span>
+          <DateRangePicker
+            start={currentRange.start}
+            end={currentRange.end}
+            onChange={(s, e) =>
+              setCurrentRange({
+                start: s ?? currentRange.start,
+                end: e ?? currentRange.end,
+              })
+            }
+          />
+        </div>
+
+        <div className="sr-range-group">
+          <span className="sr-range-label">Previous</span>
+          <DateRangePicker
+            start={previousRange.start}
+            end={previousRange.end}
+            onChange={(s, e) =>
+              setPreviousRange({
+                start: s ?? previousRange.start,
+                end: e ?? previousRange.end,
+              })
+            }
+          />
         </div>
       </div>
 
-      {/* Main split: table + details panel */}
-      <div className="rp-main-split">
-        {/* LEFT: scrollable table card with pagination footer */}
-        <div className="card rp-table-card">
-          <div className="rp-table-scroll">
-            <table className="rp-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 60, textAlign: "center" }}>Favorite</th>
-                  <th style={{ width: 70 }}>Image</th>
-                  <th>Title</th>
-                  <th style={{ width: 130, textAlign: "center" }}>Units</th>
-                  <th style={{ width: 140, textAlign: "center" }}>Revenue</th>
-                  <th style={{ width: 120, textAlign: "center" }}>Change</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} style={{ padding: 0 }}>
-                      <EmptyState
-                        title="No products"
-                        message={
-                          search
-                            ? `No products match "${search}".`
-                            : "There is no sales activity yet."
-                        }
-                      />
-                    </td>
-                  </tr>
-                ) : (
-                  pageRows.map((r) => {
-                    const isSel = r.skuId === selectedId;
-                    const isFav = favorites.has(r.skuId);
-                    return (
-                      <tr
-                        key={r.skuId}
-                        className={isSel ? "rp-selected" : ""}
-                        onClick={() => setSelectedId(r.skuId)}
-                      >
-                        <td
-                          style={{ textAlign: "center" }}
-                          onClick={(e) => e.stopPropagation()}
+      {/* Two-column layout */}
+      <div className="sr-layout">
+        <div className="sr-main">
+          {items.length === 0 ? (
+            <EmptyState
+              title="Nothing to report yet"
+              message={
+                data.total === 0
+                  ? "Daily sales are cached as the daily sync runs. Wait for the next sales sync (or run one from the Inventory page) to populate this report."
+                  : "Try a different search or date range."
+              }
+            />
+          ) : (
+            <>
+              <div className="sr-table-wrap card">
+                <table className="sr-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 36 }} />
+                      <th style={{ width: 56 }}>Image</th>
+                      <th>Title</th>
+                      <th style={{ width: 130, textAlign: "right" }}>
+                        Current
+                      </th>
+                      <th style={{ width: 130, textAlign: "right" }}>
+                        Previous
+                      </th>
+                      <th style={{ width: 100, textAlign: "right" }}>
+                        Change
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((r) => {
+                      const c = changePct(r.currentUnits, r.previousUnits);
+                      const sign = c > 0 ? "▲" : c < 0 ? "▼" : "→";
+                      const cls =
+                        c > 0
+                          ? "sr-change up"
+                          : c < 0
+                            ? "sr-change down"
+                            : "sr-change flat";
+                      const selected = selectedKey === r.key;
+                      return (
+                        <tr
+                          key={r.key}
+                          className={selected ? "selected" : ""}
+                          onClick={() =>
+                            setSelectedKey(selected ? null : r.key)
+                          }
                         >
-                          <span
-                            className={`rp-fav-star ${isFav ? "active" : ""}`}
-                            onClick={() => toggleFav(r.skuId)}
-                          >
-                            <svg
-                              width="15"
-                              height="15"
-                              viewBox="0 0 24 24"
-                              fill={isFav ? "currentColor" : "none"}
-                              stroke="currentColor"
-                              strokeWidth="1.8"
-                            >
-                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                            </svg>
-                          </span>
-                        </td>
-                        <td>
-                          <div
-                            className="rp-product-img"
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              background: "var(--surface-2)",
-                              color: "var(--text-4)",
-                              fontWeight: 700,
-                              fontSize: 13,
-                            }}
-                          >
-                            {r.title.charAt(0).toUpperCase()}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="rp-title-text">{r.title}</div>
-                          <div className="rp-ids-row">
-                            <span
-                              className="copy-btn"
+                          <td>
+                            <button
+                              type="button"
+                              className={"star" + (r.favorite ? " active" : "")}
+                              title={
+                                r.favorite ? "Unfavorite" : "Mark as favorite"
+                              }
                               onClick={(e) => {
                                 e.stopPropagation();
-                                copy(r.sku);
+                                toggleFavorite.mutate({
+                                  skuId: r.skuId,
+                                  favorite: !r.favorite,
+                                });
                               }}
                             >
-                              {r.sku} <CopyIcon />
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <div className="rp-unit-value">{num(r.units)}</div>
-                        </td>
-                        <td>
-                          <div className="rp-unit-value">
-                            {money(r.revenue)}
-                          </div>
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          {/* prevRevenue is always 0 — no prior period exists,
-                              so render a neutral pill, never a fake delta. */}
-                          <span
-                            className="rp-change-pill flat"
-                            title="No prior period data available"
-                          >
-                            —
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Sticky pagination footer */}
-          <div className="rp-pagination-footer">
-            <div style={{ fontSize: 12.5, color: "var(--text-3)" }}>
-              Showing{" "}
-              <strong style={{ color: "var(--text)" }}>
-                {showingFrom}–{showingTo}
-              </strong>{" "}
-              of{" "}
-              <strong style={{ color: "var(--text)" }}>
-                {num(filtered.length)}
-              </strong>{" "}
-              products
-            </div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button
-                className="btn btn-secondary btn-icon btn-sm"
-                disabled={safePage === 0}
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-              >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                >
-                  <polyline points="15 18 9 12 15 6" />
-                </svg>
-              </button>
-              <span
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-2)",
-                  padding: "0 6px",
-                  fontWeight: 600,
-                }}
-              >
-                Page {safePage + 1} / {pageCount}
-              </span>
-              <button
-                className="btn btn-secondary btn-icon btn-sm"
-                disabled={safePage >= pageCount - 1}
-                onClick={() =>
-                  setPage((p) => Math.min(pageCount - 1, p + 1))
-                }
-              >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                >
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT: details panel */}
-        <div className="card rp-details-card">
-          <div className="rp-details-header">
-            <div className="rp-see-details-badge">See Details</div>
-            <span className="rp-details-name">
-              {selected ? selected.title : "Select any product"}
-            </span>
-          </div>
-
-          <div className="rp-view-section">
-            {/* Donut: revenue share of top SKUs (real data) */}
-            <div className="rp-pie-section">
-              <div className="rp-chart-title" style={{ alignSelf: "stretch" }}>
-                Revenue Share by Product
+                              ★
+                            </button>
+                          </td>
+                          <td>
+                            {r.imageUrl ? (
+                              <img
+                                className="sr-thumb"
+                                src={r.imageUrl}
+                                alt=""
+                              />
+                            ) : (
+                              <div className="sr-thumb sr-thumb-placeholder" />
+                            )}
+                          </td>
+                          <td>
+                            <div className="sr-title-cell">
+                              <span className="sr-title-text">
+                                {r.title ?? "—"}
+                              </span>
+                              <span className="sr-ids">
+                                {r.asin && (
+                                  <span className="sr-id">{r.asin}</span>
+                                )}
+                                <span className="sr-id">{r.sku}</span>
+                              </span>
+                            </div>
+                          </td>
+                          <td className="sr-num">{num(r.currentUnits)}</td>
+                          <td className="sr-num">{num(r.previousUnits)}</td>
+                          <td className={"sr-num " + cls}>
+                            {sign} {Math.abs(c)}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-              <div className="rp-pie-large-wrap">
-                <Donut slices={donutSlices} />
-              </div>
-              <div className="rp-pie-legend">
-                {donutSlices.length === 0 ? (
-                  <span style={{ color: "var(--text-3)" }}>
-                    No revenue data
-                  </span>
-                ) : (
-                  donutSlices.map((s) => (
-                    <span className="rp-pie-legend-item" key={s.label}>
-                      <span
-                        className="rp-pie-legend-swatch"
-                        style={{ background: s.color }}
-                      />
-                      <span
-                        style={{
-                          maxWidth: 140,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {s.label}
-                      </span>
-                      <span style={{ color: "var(--text-3)" }}>
-                        {s.pct.toFixed(1)}%
-                      </span>
-                    </span>
-                  ))
-                )}
-              </div>
-            </div>
 
-            <div className="rp-section-divider" />
-
-            {/* Bars: selected SKU units vs revenue (real values) */}
-            <div className="rp-line-section">
-              <div className="rp-chart-title">Selected Product</div>
-              {selected ? (
-                <>
-                  <CompareBars
-                    units={selected.units}
-                    revenue={selected.revenue}
-                    maxUnits={maxUnits}
-                    maxRevenue={maxRevenue}
-                  />
-                  <div className="rp-line-legend">
-                    <span className="rp-line-legend-item">
-                      <span
-                        className="rp-line-legend-line"
-                        style={{ background: "#1f47e5", color: "#1f47e5" }}
-                      />
-                      Units {num(selected.units)}
-                    </span>
-                    <span className="rp-line-legend-item">
-                      <span
-                        className="rp-line-legend-line"
-                        style={{ background: "#14b8a6", color: "#14b8a6" }}
-                      />
-                      Revenue {money(selected.revenue)}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      marginTop: 10,
-                      fontSize: 11,
-                      color: "var(--text-3)",
-                      textAlign: "center",
-                    }}
+              {totalPages > 1 && (
+                <div className="inv-pagination" style={{ marginTop: 16 }}>
+                  <button
+                    className="inv-page-arrow"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
                   >
-                    No prior-period data is available, so
-                    period-over-period change is not shown.
-                  </div>
-                </>
-              ) : (
-                <div
-                  style={{
-                    padding: "24px 8px",
-                    textAlign: "center",
-                    color: "var(--text-3)",
-                    fontSize: 12.5,
-                  }}
-                >
-                  Select a product from the table to see its units and
-                  revenue.
+                    ←
+                  </button>
+                  <span style={{ fontSize: 13, padding: "0 8px" }}>
+                    Page {page} of {totalPages}
+                  </span>
+                  <button
+                    className="inv-page-arrow"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    →
+                  </button>
+                  <select
+                    className="inv-pagesize"
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                  >
+                    {[25, 50, 100, 200].map((n) => (
+                      <option key={n} value={n}>
+                        {n} / page
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
-            </div>
-          </div>
+            </>
+          )}
         </div>
+
+        {/* Right rail */}
+        <aside className="sr-rail">
+          {selectedRow ? (
+            <>
+              <div className="card sr-rail-card">
+                <div className="sr-rail-head">
+                  <div>
+                    <div className="sr-rail-title">{selectedRow.title ?? selectedRow.key}</div>
+                    <div className="sr-rail-sub">
+                      {selectedRow.asin ?? ""} · {selectedRow.sku}
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => setDetailFor(selectedRow)}
+                  >
+                    See Details
+                  </button>
+                </div>
+
+                <div style={{ height: 200 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={selectedLine}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis
+                        dataKey="day"
+                        tick={{ fontSize: 11 }}
+                        label={{ value: "Day", position: "insideBottom", offset: -2, fontSize: 11 }}
+                      />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Line
+                        name={`Current (${currentRange.start} → ${currentRange.end})`}
+                        type="monotone"
+                        dataKey="current"
+                        stroke="#1f47e5"
+                        dot={false}
+                        connectNulls
+                      />
+                      <Line
+                        name={`Previous (${previousRange.start} → ${previousRange.end})`}
+                        type="monotone"
+                        dataKey="previous"
+                        stroke="#f97316"
+                        dot={false}
+                        connectNulls
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div style={{ height: 180, marginTop: 12 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={selectedCurrPrev}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={40}
+                        outerRadius={70}
+                        label={(e) => `${e.name}: ${e.value}`}
+                      >
+                        {selectedCurrPrev.map((s, i) => (
+                          <Cell key={i} fill={s.fill} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="card sr-rail-card">
+              <div className="sr-rail-head">
+                <div>
+                  <div className="sr-rail-title">Workspace totals</div>
+                  <div className="sr-rail-sub">
+                    {num(data.totals.currentUnits)} vs {num(data.totals.previousUnits)} units
+                    {" · "}
+                    <span
+                      className={
+                        totalsChange > 0
+                          ? "sr-change up"
+                          : totalsChange < 0
+                            ? "sr-change down"
+                            : "sr-change flat"
+                      }
+                    >
+                      {totalsChange > 0 ? "▲" : totalsChange < 0 ? "▼" : "→"}{" "}
+                      {Math.abs(totalsChange)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {monthlyPie.length > 0 ? (
+                <div style={{ height: 220 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={monthlyPie}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={50}
+                        outerRadius={85}
+                      >
+                        {monthlyPie.map((s, i) => (
+                          <Cell key={i} fill={s.fill} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: "var(--text-3)", padding: 12 }}>
+                  Select at least one month below to see the monthly breakdown.
+                </div>
+              )}
+
+              <div className="sr-month-checks">
+                {allMonths.map((m) => (
+                  <label key={m} className="sr-month-check">
+                    <input
+                      type="checkbox"
+                      checked={selectedMonths.includes(m)}
+                      onChange={() => toggleMonth(m)}
+                    />
+                    {fmtMonth(m)}
+                  </label>
+                ))}
+              </div>
+
+              <div style={{ height: 200, marginTop: 12 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={dailyAllQ.data?.items ?? []}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 10 }}
+                      hide={(dailyAllQ.data?.items?.length ?? 0) > 90}
+                    />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip
+                      formatter={(value: unknown) => [
+                        typeof value === "number" ? num(value) : String(value),
+                        "Units",
+                      ]}
+                    />
+                    <Line
+                      name="Total daily units"
+                      type="monotone"
+                      dataKey="units"
+                      stroke="#14b8a6"
+                      dot={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+        </aside>
       </div>
+
+      <SalesReportModal
+        open={detailFor != null}
+        sku={detailFor?.sku ?? null}
+        asin={detailFor?.asin ?? null}
+        title={detailFor?.title ?? detailFor?.sku ?? ""}
+        imageUrl={detailFor?.imageUrl ?? null}
+        price={null}
+        onClose={() => setDetailFor(null)}
+      />
     </div>
   );
 }
+
+export type { TableRow as SaleReportRow };

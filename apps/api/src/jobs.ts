@@ -26,8 +26,11 @@ import {
   buyBoxLossEmailText,
   salesAlertEmailHtml,
   salesAlertEmailText,
+  priceAlertEmailHtml,
+  priceAlertEmailText,
 } from "./lib/emailTemplates.js";
 import { evaluateSalesAlerts } from "./amazon/salesAlertEval.js";
+import { evaluatePriceAlerts } from "./amazon/priceAlertEval.js";
 import { broadcast } from "./ws.js";
 import { rowMatchesBuyboxFilter, type LostBuyboxRow } from "@fbm/shared";
 
@@ -70,6 +73,7 @@ export const LOST_BUYBOX_CRON_QUEUE = "lost-buybox-cron";
 export const BUYBOX_ALERT_DIGEST_QUEUE = "buybox-alert-digest";
 /** Every 15 min: evaluates sales-alert triggers + sends digest at chosen time. */
 export const SALES_ALERT_DIGEST_QUEUE = "sales-alert-digest";
+export const PRICE_ALERT_DIGEST_QUEUE = "price-alert-digest";
 
 /* ----- Legacy-style 4-stage daily SKUs sync (Asia/Dhaka timings) ----- */
 export const LISTINGS_SYNC_QUEUE = "listings-sync";          // per-workspace stage worker
@@ -725,11 +729,12 @@ export async function startJobs(): Promise<void> {
   });
   await boss.schedule(SCHEDULE_TICK_QUEUE, "* * * * *");
 
-  // ---- Sales-alert digest: evaluate triggers + email at chosen time ----
+  // ---- Sales-alert digest: per-alert evaluation + email at chosen time ----
   await boss.createQueue(SALES_ALERT_DIGEST_QUEUE);
   await boss.work(SALES_ALERT_DIGEST_QUEUE, async () => {
-    const settings = await sql<
+    const alerts = await sql<
       {
+        id: string;
         workspaceId: string;
         sendTime: string;
         timezone: string;
@@ -737,41 +742,43 @@ export async function startJobs(): Promise<void> {
         thresholdDropPct: number;
         thresholdZeroDays: number;
         thresholdLowDays: number;
+        tagLabels: string[];
+        channels: string[];
         lastSentOn: string | null;
       }[]
     >`
-      select workspace_id as "workspaceId", send_time as "sendTime",
+      select id, workspace_id as "workspaceId", send_time as "sendTime",
              timezone, emails,
              threshold_drop_pct as "thresholdDropPct",
              threshold_zero_days as "thresholdZeroDays",
              threshold_low_days as "thresholdLowDays",
+             tag_labels as "tagLabels", channels,
              last_sent_on as "lastSentOn"
-        from sales_alert_settings
+        from sales_alerts
        where enabled = true
     `;
-    for (const s of settings) {
-      const { date, hm } = localParts(s.timezone);
-      if (s.lastSentOn === date) continue;
-      if (hm < s.sendTime) continue;
+    for (const a of alerts) {
+      const { date, hm } = localParts(a.timezone);
+      if (a.lastSentOn === date) continue;
+      if (hm < a.sendTime) continue;
 
       try {
-        const items = await evaluateSalesAlerts(s.workspaceId, {
-          thresholdDropPct: s.thresholdDropPct,
-          thresholdZeroDays: s.thresholdZeroDays,
-          thresholdLowDays: s.thresholdLowDays,
+        const items = await evaluateSalesAlerts(a.workspaceId, {
+          thresholdDropPct: a.thresholdDropPct,
+          thresholdZeroDays: a.thresholdZeroDays,
+          thresholdLowDays: a.thresholdLowDays,
+          tagLabels: a.tagLabels ?? [],
+          channels: a.channels ?? [],
         });
 
-        // De-dupe today's alerts: only insert (workspace, sku_id, reason) we
-        // haven't already created for the same kind today, so re-runs in the
-        // same day don't pile rows up if the cron retries.
         if (items.length > 0) {
-          const rows = items.map((a) => ({
-            workspace_id: s.workspaceId,
+          const rows = items.map((x) => ({
+            workspace_id: a.workspaceId,
             kind: "sales",
-            sku_id: a.skuId,
-            title: a.title_full,
-            message: a.message,
-            severity: a.severity,
+            sku_id: x.skuId,
+            title: x.title_full,
+            message: x.message,
+            severity: x.severity,
           }));
           await sql`
             insert into alerts ${sql(
@@ -786,38 +793,38 @@ export async function startJobs(): Promise<void> {
           `;
         }
 
-        const emails = s.emails ?? [];
+        const emails = a.emails ?? [];
         if (items.length > 0 && emails.length > 0) {
-          const reportUrl = `${appUrl}/sales`;
+          const reportUrl = `${appUrl}/sales-alert`;
           await sendMail({
             to: emails,
             subject: `[Sales] ${items.length} alert${
               items.length === 1 ? "" : "s"
             } for your SKUs`,
             html: salesAlertEmailHtml({
-              rows: items.map((a) => ({
-                sku: a.sku,
-                asin: a.asin,
-                reason: a.reason,
-                stock: a.stock,
-                sales7d: a.sales7d,
-                sales30d: a.sales30d,
-                daysOfSupply: a.daysOfSupply,
-                message: a.message,
+              rows: items.map((x) => ({
+                sku: x.sku,
+                asin: x.asin,
+                reason: x.reason,
+                stock: x.stock,
+                sales7d: x.sales7d,
+                sales30d: x.sales30d,
+                daysOfSupply: x.daysOfSupply,
+                message: x.message,
               })),
               reportUrl,
               scannedAt: new Date().toISOString(),
             }),
             text: salesAlertEmailText({
-              rows: items.map((a) => ({
-                sku: a.sku,
-                asin: a.asin,
-                reason: a.reason,
-                stock: a.stock,
-                sales7d: a.sales7d,
-                sales30d: a.sales30d,
-                daysOfSupply: a.daysOfSupply,
-                message: a.message,
+              rows: items.map((x) => ({
+                sku: x.sku,
+                asin: x.asin,
+                reason: x.reason,
+                stock: x.stock,
+                sales7d: x.sales7d,
+                sales30d: x.sales30d,
+                daysOfSupply: x.daysOfSupply,
+                message: x.message,
               })),
               reportUrl,
             }),
@@ -827,26 +834,118 @@ export async function startJobs(): Promise<void> {
         }
 
         if (items.length > 0) {
-          broadcast(s.workspaceId, {
+          broadcast(a.workspaceId, {
             type: "sales_alerts_evaluated",
             count: items.length,
           });
         }
 
+        // Mark today's send even when no items matched, so we don't re-query
+        // every 15 min for the rest of the day.
         await sql`
-          update sales_alert_settings
+          update sales_alerts
              set last_sent_on = ${date}, updated_at = now()
-           where workspace_id = ${s.workspaceId}
+           where id = ${a.id}
         `;
       } catch (err) {
         logger.error(
-          { err, workspaceId: s.workspaceId },
+          { err, alertId: a.id, workspaceId: a.workspaceId },
           "sales-alert evaluation failed",
         );
       }
     }
   });
   await boss.schedule(SALES_ALERT_DIGEST_QUEUE, "*/15 * * * *");
+
+  // ---- Price-alert digest: per-alert evaluation + email at chosen time ----
+  await boss.createQueue(PRICE_ALERT_DIGEST_QUEUE);
+  await boss.work(PRICE_ALERT_DIGEST_QUEUE, async () => {
+    const alerts = await sql<
+      {
+        id: string;
+        workspaceId: string;
+        sendTime: string;
+        timezone: string;
+        emails: string[];
+        dropPct: number;
+        tagLabels: string[];
+        channels: string[];
+        lastSentOn: string | null;
+      }[]
+    >`
+      select id, workspace_id as "workspaceId", send_time as "sendTime",
+             timezone, emails,
+             drop_pct as "dropPct",
+             tag_labels as "tagLabels", channels,
+             last_sent_on as "lastSentOn"
+        from price_alerts
+       where enabled = true
+    `;
+    for (const a of alerts) {
+      const { date, hm } = localParts(a.timezone);
+      if (a.lastSentOn === date) continue;
+      if (hm < a.sendTime) continue;
+
+      try {
+        const items = await evaluatePriceAlerts(a.workspaceId, {
+          dropPct: a.dropPct,
+          tagLabels: a.tagLabels ?? [],
+          channels: a.channels ?? [],
+        });
+
+        const emails = a.emails ?? [];
+        if (items.length > 0 && emails.length > 0) {
+          const reportUrl = `${appUrl}/price-alert`;
+          await sendMail({
+            to: emails,
+            subject: `[Price] ${items.length} SKU${
+              items.length === 1 ? "" : "s"
+            } priced below base`,
+            html: priceAlertEmailHtml({
+              rows: items.map((x) => ({
+                sku: x.sku,
+                asin: x.asin,
+                title: x.title,
+                channel: x.channel,
+                basePrice: x.basePrice,
+                price: x.price,
+                dropPct: x.dropPct,
+              })),
+              dropPct: a.dropPct,
+              reportUrl,
+            }),
+            text: priceAlertEmailText({
+              rows: items.map((x) => ({
+                sku: x.sku,
+                asin: x.asin,
+                title: x.title,
+                channel: x.channel,
+                basePrice: x.basePrice,
+                price: x.price,
+                dropPct: x.dropPct,
+              })),
+              dropPct: a.dropPct,
+              reportUrl,
+            }),
+          }).catch((err) =>
+            logger.error({ err }, "Price-alert digest email failed"),
+          );
+        }
+
+        await sql`
+          update price_alerts
+             set last_sent_on = ${date}, updated_at = now()
+           where id = ${a.id}
+        `;
+      } catch (err) {
+        logger.error(
+          { err, alertId: a.id, workspaceId: a.workspaceId },
+          "price-alert evaluation failed",
+        );
+      }
+    }
+  });
+  await boss.schedule(PRICE_ALERT_DIGEST_QUEUE, "*/15 * * * *");
 
   // ---- Legacy-style 4-stage daily SKUs sync (Asia/Dhaka) ----
   //   8:00  listings (merchant listings report → title/asin/price/qty)

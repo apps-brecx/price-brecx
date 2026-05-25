@@ -35,11 +35,11 @@ const TITLES: Record<string, [string, string]> = {
   "/products": ["Products", "Products"],
   "/skus": ["SKUs", "SKUs"],
   "/inventory": ["Inventory", "Inventory"],
-  "/price-alert": ["Pricing", "Pricing"],
+  "/price-alert": ["Price Alert", "Price Alert"],
+  "/pricing": ["Pricing", "Pricing"],
   "/pricing-v2": ["Pricing v2", "Pricing v2"],
   "/automation": ["Automation Rules", "Automation"],
   "/buybox": ["Lost Buy Box", "Lost Buy Box"],
-  "/price-alert-v2": ["Price Alert", "Price Alert"],
   "/sales-alert": ["Sales Alert", "Sales Alert"],
   "/buybox-alert": ["Buy Box Alert", "Buy Box Alert"],
   "/report": ["Sales Report", "Reports"],
@@ -273,7 +273,7 @@ export function AppLayout() {
 
         <div className="nav-section-label">Pricing</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          <NavLink to="/price-alert" className={navClass}>
+          <NavLink to="/pricing" className={navClass}>
             {ICONS.pricing}
             Pricing
           </NavLink>
@@ -300,7 +300,7 @@ export function AppLayout() {
 
         <div className="nav-section-label">Alerts</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          <NavLink to="/price-alert-v2" className={navClass}>
+          <NavLink to="/price-alert" className={navClass}>
             {ICONS.bell}
             Price Alert
             {!!counts?.priceAlerts && (
@@ -474,7 +474,7 @@ export function AppLayout() {
                   style={{ fontSize: 12.5, fontWeight: 550, color: "var(--brand-700)", cursor: "pointer" }}
                   onClick={() => {
                     setNotifOpen(false);
-                    navigate("/price-alert-v2");
+                    navigate("/price-alert");
                   }}
                 >
                   View all notifications →
