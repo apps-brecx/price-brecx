@@ -65,6 +65,68 @@ const selectCols = sql`
   created_at as "createdAt", updated_at as "updatedAt"
 `;
 
+/**
+ * Builds the shared WHERE clause for the SKUs list. Used by both the paginated
+ * `/skus` listing and the `/skus/export` (download-all) endpoint so a CSV
+ * export honours exactly the same search / tab / filter the user is looking at.
+ */
+function buildSkuWhere(q: z.infer<typeof listQuery>, wsId: string) {
+  const search = q.search ? `%${q.search}%` : null;
+
+  // Build the multi-channel predicate. Each key turns into a small OR
+  // clause; we union them into a single ANDed group so a row needs to match
+  // *any* selected key.
+  const channelKeys = (q.channels ?? []).filter((k) =>
+    (CHANNEL_KEYS as readonly string[]).includes(k),
+  );
+  const channelClause = channelKeys.length
+    ? sql`and (${channelKeys
+        .map((k) => {
+          if (k === "amazon-fba") {
+            return sql`(channel = 'amazon' and coalesce(fulfillment_channel,'') <> 'DEFAULT')`;
+          }
+          if (k === "amazon-fbm") {
+            return sql`(channel = 'amazon' and fulfillment_channel = 'DEFAULT')`;
+          }
+          return sql`(channel = ${k})`;
+        })
+        .reduce((acc, frag, i) => (i === 0 ? frag : sql`${acc} or ${frag}`))})`
+    : sql``;
+
+  // Stock buckets — "in" / "low" / "out". `stock` is already the channel
+  // total (greatest(stock, merchant+fba_fulfillable+fba_pending)) thanks to
+  // the listings/FBA sync upserts.
+  const stockKeys = (q.stockBuckets ?? []).filter((k) =>
+    (STOCK_KEYS as readonly string[]).includes(k),
+  );
+  const stockClause = stockKeys.length
+    ? sql`and (${stockKeys
+        .map((k) => {
+          if (k === "in") return sql`(stock > 0)`;
+          if (k === "low") return sql`(stock > 0 and stock < 50)`;
+          return sql`(stock <= 0)`;
+        })
+        .reduce((acc, frag, i) => (i === 0 ? frag : sql`${acc} or ${frag}`))})`
+    : sql``;
+
+  return sql`
+    where workspace_id = ${wsId}
+    ${search ? sql`and (sku ilike ${search} or title ilike ${search} or asin ilike ${search})` : sql``}
+    ${q.status ? sql`and status = ${q.status}` : sql``}
+    ${q.channel ? sql`and channel = ${q.channel}` : sql``}
+    ${q.favorite ? sql`and favorite = true` : sql``}
+    ${q.scheduled ? sql`and id in (
+        select sku_id from price_schedules
+        where workspace_id = ${wsId}
+          and status in ('scheduled','running')
+      )` : sql``}
+    ${channelClause}
+    ${stockClause}
+    ${q.priceMin != null ? sql`and price >= ${q.priceMin}` : sql``}
+    ${q.priceMax != null ? sql`and price <= ${q.priceMax}` : sql``}
+  `;
+}
+
 export default async function skuRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.requireAuth);
 
@@ -72,60 +134,7 @@ export default async function skuRoutes(app: FastifyInstance) {
     const q = listQuery.parse(req.query);
     const wsId = req.user!.workspaceId;
     const offset = (q.page - 1) * q.pageSize;
-    const search = q.search ? `%${q.search}%` : null;
-
-    // Build the multi-channel predicate. Each key turns into a small OR
-    // clause; we union them into a single ANDed group so a row needs to match
-    // *any* selected key.
-    const channelKeys = (q.channels ?? []).filter((k) =>
-      (CHANNEL_KEYS as readonly string[]).includes(k),
-    );
-    const channelClause = channelKeys.length
-      ? sql`and (${channelKeys
-          .map((k) => {
-            if (k === "amazon-fba") {
-              return sql`(channel = 'amazon' and coalesce(fulfillment_channel,'') <> 'DEFAULT')`;
-            }
-            if (k === "amazon-fbm") {
-              return sql`(channel = 'amazon' and fulfillment_channel = 'DEFAULT')`;
-            }
-            return sql`(channel = ${k})`;
-          })
-          .reduce((acc, frag, i) => (i === 0 ? frag : sql`${acc} or ${frag}`))})`
-      : sql``;
-
-    // Stock buckets — "in" / "low" / "out". `stock` is already the channel
-    // total (greatest(stock, merchant+fba_fulfillable+fba_pending)) thanks to
-    // the listings/FBA sync upserts.
-    const stockKeys = (q.stockBuckets ?? []).filter((k) =>
-      (STOCK_KEYS as readonly string[]).includes(k),
-    );
-    const stockClause = stockKeys.length
-      ? sql`and (${stockKeys
-          .map((k) => {
-            if (k === "in") return sql`(stock > 0)`;
-            if (k === "low") return sql`(stock > 0 and stock < 50)`;
-            return sql`(stock <= 0)`;
-          })
-          .reduce((acc, frag, i) => (i === 0 ? frag : sql`${acc} or ${frag}`))})`
-      : sql``;
-
-    const where = sql`
-      where workspace_id = ${wsId}
-      ${search ? sql`and (sku ilike ${search} or title ilike ${search} or asin ilike ${search})` : sql``}
-      ${q.status ? sql`and status = ${q.status}` : sql``}
-      ${q.channel ? sql`and channel = ${q.channel}` : sql``}
-      ${q.favorite ? sql`and favorite = true` : sql``}
-      ${q.scheduled ? sql`and id in (
-          select sku_id from price_schedules
-          where workspace_id = ${wsId}
-            and status in ('scheduled','running')
-        )` : sql``}
-      ${channelClause}
-      ${stockClause}
-      ${q.priceMin != null ? sql`and price >= ${q.priceMin}` : sql``}
-      ${q.priceMax != null ? sql`and price <= ${q.priceMax}` : sql``}
-    `;
+    const where = buildSkuWhere(q, wsId);
 
     const [{ count }] = await sql<{ count: number }[]>`
       select count(*)::int as count from skus ${where}
@@ -136,6 +145,23 @@ export default async function skuRoutes(app: FastifyInstance) {
       limit ${q.pageSize} offset ${offset}
     `;
     return { items, total: count, page: q.page, pageSize: q.pageSize };
+  });
+
+  /**
+   * Download-all: returns every SKU matching the current search / tab / filter
+   * in one shot (no pagination), so the Products/SKUs page can build a CSV the
+   * user opens in Excel. Reuses `buildSkuWhere` so the export matches whatever
+   * the filtered table is showing.
+   */
+  app.get("/skus/export", async (req) => {
+    const q = listQuery.parse(req.query);
+    const wsId = req.user!.workspaceId;
+    const where = buildSkuWhere(q, wsId);
+    const items = await sql`
+      select ${selectCols} from skus ${where}
+      order by updated_at desc
+    `;
+    return { items, total: items.length };
   });
 
   /**
