@@ -27,11 +27,14 @@ const REASON_LABEL: Record<string, string> = {
 };
 
 const money = (n: number | null) => (n == null ? "—" : `$${n.toFixed(2)}`);
-const sellerShort = (s: string | null) =>
-  s ? `${s.slice(0, 5)}…${s.slice(-3)}` : "—";
 
 /** Amazon listing URL for an ASIN. */
 const amazonUrl = (asin: string) => `https://www.amazon.com/dp/${asin}`;
+
+/** Amazon storefront URL for a seller ID — opens the seller's page, which
+ *  shows their real business name (the SP-API only ever returns the ID). */
+const sellerUrl = (sellerId: string) =>
+  `https://www.amazon.com/sp?seller=${encodeURIComponent(sellerId)}`;
 
 const CopyIcon = () => (
   <svg
@@ -923,7 +926,20 @@ export function LostBuyBox() {
                         color: "var(--text-3)",
                       }}
                     >
-                      {sellerShort(r.buyboxSellerId)}
+                      {r.buyboxSellerId ? (
+                        <a
+                          className="lbb-link"
+                          href={sellerUrl(r.buyboxSellerId)}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={`Open seller ${r.buyboxSellerId} on Amazon`}
+                        >
+                          <span>{r.buyboxSellerId}</span>
+                          <ExtLinkIcon />
+                        </a>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td style={{ textAlign: "center" }}>
                       <span className={"lbb-reason " + r.reason}>
