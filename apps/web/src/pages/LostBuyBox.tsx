@@ -31,10 +31,13 @@ const money = (n: number | null) => (n == null ? "—" : `$${n.toFixed(2)}`);
 /** Amazon listing URL for an ASIN. */
 const amazonUrl = (asin: string) => `https://www.amazon.com/dp/${asin}`;
 
-/** Amazon storefront URL for a seller ID — opens the seller's page, which
- *  shows their real business name (the SP-API only ever returns the ID). */
+/** Amazon storefront URL for a seller ID — opens the seller's storefront,
+ *  which shows their business name (the SP-API only returns the ID).
+ *  Uses Amazon's `/s?me=<ID>` form (the same link Amazon's own "More products
+ *  from this seller" widget uses); the older `/sp?seller=<ID>` page now often
+ *  fails without extra context. */
 const sellerUrl = (sellerId: string) =>
-  `https://www.amazon.com/sp?seller=${encodeURIComponent(sellerId)}`;
+  `https://www.amazon.com/s?me=${encodeURIComponent(sellerId)}`;
 
 const CopyIcon = () => (
   <svg
